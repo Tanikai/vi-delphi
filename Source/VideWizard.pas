@@ -32,11 +32,35 @@ type
     procedure BeforeDestruction; override;
   end;
 
+// See https://www.davidghoyle.co.uk/WordPress/?page_id=1110 for combined Wizard
+// and DLL .pas file
 procedure Register;
+Function InitWizard(Const BorlandIDEServices: IBorlandIDEServices; RegisterProc: TWizardRegisterProc;
+  var Terminate: TWizardTerminateProc): Boolean; StdCall;
+
+exports InitWizard Name WizardEntryPoint;
 
 implementation
 
 uses Vcl.Dialogs;
+
+Var
+  iWizard: Integer = 0;
+
+Function InitialiseWizard(BIDES: IBorlandIDEServices): TVIDEWizard;
+
+Begin
+  Result := TVIDEWizard.Create;
+  Application.Handle := (BIDES As IOTAServices).GetParentHandle;
+End;
+
+Function InitWizard(Const BorlandIDEServices: IBorlandIDEServices; RegisterProc: TWizardRegisterProc;
+  var Terminate: TWizardTerminateProc): Boolean; StdCall;
+
+Begin
+  Result := BorlandIDEServices <> Nil;
+  RegisterProc(InitialiseWizard(BorlandIDEServices));
+End;
 
 procedure Register;
 begin
