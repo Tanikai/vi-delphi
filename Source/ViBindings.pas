@@ -10,6 +10,7 @@ uses
 type
   TDirection = (dForward, dBack);
   TBlockAction = (baDelete, baYank);
+
   TViRegister = record
     IsLine: Boolean;
     Text: String;
@@ -38,8 +39,8 @@ type
     FSelectedRegister: Integer;
     FPreviousAction: TViAction;
     FInsertText: String;
-    FMarkArray: array[0..255] of TOTAEditPos;
-    FRegisterArray: array[0..255] of TViRegister;
+    FMarkArray: array [0 .. 255] of TOTAEditPos;
+    FRegisterArray: array [0 .. 255] of TViRegister;
     FInYank: Boolean;
     FChar: Char;
     FShift: TShiftState;
@@ -74,10 +75,10 @@ type
     procedure SwitchToInsertModeOrDoPreviousAction;
   public
     constructor Create;
-    procedure EditKeyDown(Key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
-    procedure EditChar(Key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+    procedure EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+    procedure EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure ConfigureCursor;
-    property Count: Integer read GetCount;
+    property count: Integer read GetCount;
     property InsertMode: Boolean read FInsertMode write SetInsertMode;
     property Active: Boolean read FActive write FActive;
   end;
@@ -128,7 +129,7 @@ begin
   InsertMode := False;
 end;
 
-procedure TViBindings.EditChar(Key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
 begin
   if not Active then
     Exit;
@@ -137,29 +138,30 @@ begin
     Exit;
 
   FShift := Shift;
-  HandleChar(Chr(Key));
+  HandleChar(Chr(key));
   Handled := True;
   (BorlandIDEServices As IOTAEditorServices).TopView.Paint;
 end;
 
-procedure TViBindings.EditKeyDown(Key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+procedure TViBindings.EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
 
   function GetTopMostEditView: IOTAEditView;
   var
     EditBuffer: IOTAEditBuffer;
   begin
-    Result  := nil;
+    Result := nil;
     EditBuffer := GetEditBuffer;
     if EditBuffer <> nil then
       Exit(EditBuffer.GetTopView);
   end;
 
 begin
-  if not Active then Exit;
+  if not Active then
+    Exit;
 
   if InsertMode then
   begin
-    if (Key = VK_ESCAPE) then
+    if (key = VK_ESCAPE) then
     begin
       GetTopMostEditView.Buffer.BufferOptions.InsertMode := True;
       InsertMode := False;
@@ -170,12 +172,9 @@ begin
   end
   else
   begin
-    if (((Key >= Ord('A')) and (Key <= Ord('Z'))) or
-        ((Key >= Ord('0')) and (Key <= Ord('9'))) or
-        ((Key >= 186) and (Key <= 192)) or
-        ((Key >= 219) and (Key <= 222))) and
-        not ((ssCtrl in Shift) or (ssAlt in Shift)) and
-        not InsertMode then
+    if (((key >= Ord('A')) and (key <= Ord('Z'))) or ((key >= Ord('0')) and (key <= Ord('9'))) or
+      ((key >= 186) and (key <= 192)) or ((key >= 219) and (key <= 222))) and not((ssCtrl in Shift) or (ssAlt in Shift))
+      and not InsertMode then
     begin
       // If the keydown is a standard keyboard press not altered with a ctrl or alt key
       // then create a WM_CHAR message so we can do all the locale mapping of the keyboard
@@ -204,22 +203,24 @@ end;
 procedure TViBindings.UpdateCount;
 begin
   FParsingNumber := True;
-  if CharInSet(FChar, ['0'..'9']) then
+  if CharInSet(FChar, ['0' .. '9']) then
     FCount := 10 * FCount + (Ord(FChar) - Ord('0'));
 end;
 
-type TViCharClass = (viWhiteSpace, viWord, viSpecial);
+type
+  TViCharClass = (viWhiteSpace, viWord, viSpecial);
 
 procedure TViBindings.ApplyActionToBlock(Action: TBlockAction; IsLine: Boolean);
 var
-  Count: Integer;
+  count: Integer;
   Pos: TOTAEditPos;
   EditBlock: IOTAEditBlock;
 begin
-  Count := GetCount * GetEditCount;
+  count := GetCount * GetEditCount;
   ResetCount;
-  Pos := GetPositionForMove(FChar, Count);
-  if CharInSet(FChar, ['e', 'E']) then Pos.Col := Pos.Col + 1;
+  Pos := GetPositionForMove(FChar, count);
+  if CharInSet(FChar, ['e', 'E']) then
+    Pos.Col := Pos.Col + 1;
 
   EditBlock := FBuffer.EditBlock;
   EditBlock.Reset;
@@ -319,7 +320,7 @@ var
   I: Integer;
 begin
   FEditPosition.SearchOptions.Direction := sdBackward;
-  for I := 1 to Count do
+  for I := 1 to count do
     FEditPosition.SearchAgain;
 end;
 
@@ -345,7 +346,7 @@ begin
   EditBlock.EndBlock;
 
   // Move to one position after what we're searching for.
-  FEditPosition.Move(Pos.Line, Pos.Col+1);
+  FEditPosition.Move(Pos.Line, Pos.Col + 1);
 
   FEditPosition.SearchOptions.CaseSensitive := False;
   FEditPosition.SearchOptions.Direction := sdForward;
@@ -378,13 +379,13 @@ end;
 function TViBindings.GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
 var
   Pos: TOTAEditPos;
-  i: Integer;
+  I: Integer;
   nextChar: TViCharClass;
 
-  function CharAtRelativeLocation(col: Integer): TViCharClass;
+  function CharAtRelativeLocation(Col: Integer): TViCharClass;
   begin
     FEditPosition.Save;
-    FEditPosition.MoveRelative(0, col);
+    FEditPosition.MoveRelative(0, Col);
     if FEditPosition.IsWhiteSpace or (FEditPosition.Character = #$D) then
     begin
       Result := viWhiteSpace
@@ -399,12 +400,13 @@ var
     end;
     FEditPosition.Restore;
   end;
+
 begin
   FEditPosition.Save;
 
-  case Key of
+  case key of
     '0':
-        FEditPosition.MoveBOL;
+      FEditPosition.MoveBOL;
     '$':
       begin
         FEditPosition.MoveEOL;
@@ -414,7 +416,7 @@ begin
       end;
     'b':
       begin
-        for i := 1 to count do
+        for I := 1 to count do
         begin
           nextChar := CharAtRelativeLocation(-1);
           if FEditPosition.IsWordCharacter and ((nextChar = viSpecial) or (nextChar = viWhiteSpace)) then
@@ -430,14 +432,14 @@ begin
           end;
 
           if FEditPosition.IsWordCharacter then
-            FEditPosition.MoveCursor(mmSkipWord or mmSkipLeft)  // Skip to first non word character.
+            FEditPosition.MoveCursor(mmSkipWord or mmSkipLeft) // Skip to first non word character.
           else if FEditPosition.IsSpecialCharacter then
             FEditPosition.MoveCursor(mmSkipSpecial or mmSkipLeft); // Skip to the first non special character
         end;
       end;
     'B':
       begin
-        for i := 1 to count do
+        for I := 1 to count do
         begin
           FEditPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
           FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipLeft);
@@ -445,7 +447,7 @@ begin
       end;
     'e':
       begin
-        for i := 1 to count do
+        for I := 1 to count do
         begin
           nextChar := CharAtRelativeLocation(1);
           if (FEditPosition.IsWordCharacter and (nextChar = viWhiteSpace) or (nextChar = viSpecial)) then
@@ -468,9 +470,10 @@ begin
       end;
     'E':
       begin
-        for i := 1 to count do
+        for I := 1 to count do
         begin
-          if (FEditPosition.IsWordCharacter or FEditPosition.IsSpecialCharacter) and (CharAtRelativeLocation(1) = viWhiteSpace) then
+          if (FEditPosition.IsWordCharacter or FEditPosition.IsSpecialCharacter) and
+            (CharAtRelativeLocation(1) = viWhiteSpace) then
             FEditPosition.MoveRelative(0, 1);
 
           if FEditPosition.IsWhiteSpace then
@@ -490,12 +493,13 @@ begin
       FEditPosition.MoveRelative(0, +count);
     'w':
       begin
-        for i := 1 to count do
+        for I := 1 to count do
         begin
           if FEditPosition.IsWordCharacter then
             FEditPosition.MoveCursor(mmSkipWord or mmSkipRight) // Skip to first non word character.
           else if FEditPosition.IsSpecialCharacter then
-            FEditPosition.MoveCursor(mmSkipSpecial or mmSkipRight or mmSkipStream); // Skip to the first non special character
+            FEditPosition.MoveCursor(mmSkipSpecial or mmSkipRight or mmSkipStream);
+          // Skip to the first non special character
 
           // If the character is whitespace or EOL then skip that whitespace
           if FEditPosition.IsWhiteSpace or (FEditPosition.Character = #$D) then
@@ -504,7 +508,7 @@ begin
       end;
     'W':
       begin
-        for i := 1 to count do
+        for I := 1 to count do
         begin
           // Goto first white space after the end of the word.
           FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
@@ -533,7 +537,7 @@ begin
       MoveToMarkPosition
     else if IsMovementKey then
       ProcessMovement
-    else if CharInSet(FChar, ['0'..'9']) then
+    else if CharInSet(FChar, ['0' .. '9']) then
       UpdateCount
     else if (FInDelete and (FChar = 'd')) then
       ProcessLineDeletion
@@ -557,8 +561,10 @@ begin
   end
   else
   begin
-    if (FChar = 'w') then FChar := 'e';
-    if (FChar = 'W') then FChar := 'E';
+    if (FChar = 'w') then
+      FChar := 'e';
+    if (FChar = 'W') then
+      FChar := 'E';
     SavePreviousAction;
     ApplyActionToBlock(baDelete, False);
     InsertMode := True;
@@ -581,207 +587,207 @@ var
 begin
   View := FBuffer.TopView;
   case FChar of
-  'a':
-    begin
-      FEditPosition.MoveRelative(0, 1);
-      SwitchToInsertModeOrDoPreviousAction;
-    end;
-  'A':
-    begin
-      FEditPosition.MoveEOL;
-      SwitchToInsertModeOrDoPreviousAction;
-    end;
-  'c':
-    begin
-      if FInChange then
+    'a':
       begin
-        FEditPosition.MoveBOL;
-        HandleChar('$');
-      end
-      else
+        FEditPosition.MoveRelative(0, 1);
+        SwitchToInsertModeOrDoPreviousAction;
+      end;
+    'A':
       begin
-        if DeleteSelection then
-          SwitchToInsertModeOrDoPreviousAction
+        FEditPosition.MoveEOL;
+        SwitchToInsertModeOrDoPreviousAction;
+      end;
+    'c':
+      begin
+        if FInChange then
+        begin
+          FEditPosition.MoveBOL;
+          HandleChar('$');
+        end
         else
         begin
-          FInChange := True;
-          FEditCount := Count;
+          if DeleteSelection then
+            SwitchToInsertModeOrDoPreviousAction
+          else
+          begin
+            FInChange := True;
+            FEditCount := count;
+          end
+        end;
+      end;
+    'C':
+      begin
+        FInChange := True;
+        FEditCount := count;
+        HandleChar('$');
+      end;
+    'd':
+      begin
+        if not DeleteSelection then
+        begin
+          FInDelete := True;
+          FEditCount := count;
+        end;
+      end;
+    'D':
+      begin
+        FInDelete := True;
+        HandleChar('$');
+      end;
+    'g':
+      begin
+        if FInGo then
+        begin
+          FEditPosition.Move(1, 1);
+          FInGo := False;
+        end
+        else
+        begin
+          FInGo := True;
+          FEditCount := count;
         end
       end;
-    end;
-  'C':
-    begin
-      FInChange := True;
-      FEditCount := Count;
-      HandleChar('$');
-    end;
-  'd':
-    begin
-      if not DeleteSelection then
+    'G':
       begin
-        FInDelete := True;
-        FEditCount := Count;
+        if FParsingNumber then
+          FEditPosition.GotoLine(count)
+        else
+          FEditPosition.MoveEOF;
       end;
-    end;
-  'D':
-    begin
-      FInDelete := True;
-      HandleChar('$');
-    end;
-  'g':
-    begin
-      if FInGo then
+    'H':
       begin
-        FEditPosition.Move(1, 1);
-        FInGo := False;
-      end
-      else
+        FEditPosition.Move(FBuffer.TopView.TopRow, 0);
+        FEditPosition.MoveBOL;
+      end;
+    'i':
+      SwitchToInsertModeOrDoPreviousAction;
+    'I':
       begin
-        FInGo := True;
-        FEditCount := Count;
-     end
-    end;
-  'G':
-    begin
-      if FParsingNumber then
-        FEditPosition.GotoLine(Count)
-      else
-        FEditPosition.MoveEOF;
-    end;
-  'H':
-    begin
-      FEditPosition.Move(FBuffer.TopView.TopRow, 0);
-      FEditPosition.MoveBOL;
-    end;
-  'i':
-    SwitchToInsertModeOrDoPreviousAction;
-  'I':
-    begin
-      FEditPosition.MoveBOL;
-      SwitchToInsertModeOrDoPreviousAction;
-    end;
-  'J':
-    begin
-      FEditPosition.MoveEOL;
-      FEditPosition.Delete(1);
-    end;
-  'L':
-    begin
-      FEditPosition.Move(View.BottomRow -1, 0);
-      FEditPosition.MoveBOL;
-    end;
-  'm':
-    FInMark := true;
-  'M':
-    begin
-      FEditPosition.Move(View.TopRow + Trunc(((View.BottomRow -1) - View.TopRow)/2), 0);
-      FEditPosition.MoveBOL;
-    end;
-  'n':
-    FindNextWordAtCursor(Count);
-  'N':
-    FindPreviousWordAtCursor;
-  'o':
-    begin
-      FEditPosition.MoveEOL;
-      FEditPosition.InsertText(#13#10);
-      SwitchToInsertModeOrDoPreviousAction;
-      (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
-    end;
-  'O':
-    begin
-      FEditPosition.MoveBOL;
-      FEditPosition.InsertText(#13#10);
-      FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight);
-      FEditPosition.MoveRelative(-1, 0);
-      SwitchToInsertModeOrDoPreviousAction;
-      (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
-    end;
-  'p':
-    Paste(FEditPosition, FBuffer, dForward);
-  'P':
-    Paste(FEditPosition, FBuffer, dBack);
-  'R':
-    begin
-      // XXX Fix me for '.' command
-      FBuffer.BufferOptions.InsertMode := False;
-      InsertMode := True;
-    end;
-  's':
-    begin
-      if not DeleteSelection then
+        FEditPosition.MoveBOL;
+        SwitchToInsertModeOrDoPreviousAction;
+      end;
+    'J':
+      begin
+        FEditPosition.MoveEOL;
         FEditPosition.Delete(1);
-      SwitchToInsertModeOrDoPreviousAction;
-    end;
-  'S':
-    begin
-      FInChange := True;
-      FEditPosition.MoveBOL;
-      HandleChar('$');
-    end;
-  'u':
-    FBuffer.Undo;
-  'x':
-    begin
-      if not DeleteSelection then
+      end;
+    'L':
+      begin
+        FEditPosition.Move(View.BottomRow - 1, 0);
+        FEditPosition.MoveBOL;
+      end;
+    'm':
+      FInMark := True;
+    'M':
+      begin
+        FEditPosition.Move(View.TopRow + Trunc(((View.BottomRow - 1) - View.TopRow) / 2), 0);
+        FEditPosition.MoveBOL;
+      end;
+    'n':
+      FindNextWordAtCursor(count);
+    'N':
+      FindPreviousWordAtCursor;
+    'o':
+      begin
+        FEditPosition.MoveEOL;
+        FEditPosition.InsertText(#13#10);
+        SwitchToInsertModeOrDoPreviousAction;
+        (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
+      end;
+    'O':
+      begin
+        FEditPosition.MoveBOL;
+        FEditPosition.InsertText(#13#10);
+        FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight);
+        FEditPosition.MoveRelative(-1, 0);
+        SwitchToInsertModeOrDoPreviousAction;
+        (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
+      end;
+    'p':
+      Paste(FEditPosition, FBuffer, dForward);
+    'P':
+      Paste(FEditPosition, FBuffer, dBack);
+    'R':
+      begin
+        // XXX Fix me for '.' command
+        FBuffer.BufferOptions.InsertMode := False;
+        InsertMode := True;
+      end;
+    's':
+      begin
+        if not DeleteSelection then
+          FEditPosition.Delete(1);
+        SwitchToInsertModeOrDoPreviousAction;
+      end;
+    'S':
+      begin
+        FInChange := True;
+        FEditPosition.MoveBOL;
+        HandleChar('$');
+      end;
+    'u':
+      FBuffer.Undo;
+    'x':
+      begin
+        if not DeleteSelection then
+        begin
+          FInDelete := True;
+          FEditCount := count - 1;
+          HandleChar('l');
+        end;
+      end;
+    'X':
       begin
         FInDelete := True;
-        FEditCount := Count - 1;
-        HandleChar('l');
+        if DeleteSelection then
+          HandleChar('d')
+        else
+        begin
+          FEditCount := count - 1;
+          HandleChar('h');
+        end
       end;
-    end;
-  'X':
-    begin
-      FInDelete := True;
-      if DeleteSelection then
-        HandleChar('d')
-      else
+    'y':
       begin
-        FEditCount := Count - 1;
-        HandleChar('h');
-      end
-    end;
-  'y':
-    begin
-      FInYank := not YankSelection;
-      if FInYank then
-        FEditCount := Count;
-    end;
-  'Y':
-    begin
-      FInYank := True;
-      FEditCount := Count;
-      HandleChar('y');
-    end;
-  '.':
-    begin
-      FInRepeatChange := True;
-      FInDelete := FPreviousAction.FInDelete;
-      FInChange := FPreviousAction.FInChange;
-      FEditCount := FPreviousAction.FEditCount;
-      FCount := FPreviousAction.FCount;
-      HandleChar(FPreviousAction.ActionChar);
-      FInRepeatChange := False;
-    end;
-  '*':
-    FindWordAtCursor(View, Count);
-  '''':
-    FInGotoMark := True;
-  '^':
-    begin
-      FEditPosition.MoveBOL;
-      FEditPosition.MoveCursor(mmSkipWhite);
-    end;
-  '>':
-    begin
-      SavePreviousAction;
-      ChangeIndentation(dForward);
-    end;
-  '<':
-    begin
-      SavePreviousAction;
-      ChangeIndentation(dBack);
-    end;
+        FInYank := not YankSelection;
+        if FInYank then
+          FEditCount := count;
+      end;
+    'Y':
+      begin
+        FInYank := True;
+        FEditCount := count;
+        HandleChar('y');
+      end;
+    '.':
+      begin
+        FInRepeatChange := True;
+        FInDelete := FPreviousAction.FInDelete;
+        FInChange := FPreviousAction.FInChange;
+        FEditCount := FPreviousAction.FEditCount;
+        FCount := FPreviousAction.FCount;
+        HandleChar(FPreviousAction.ActionChar);
+        FInRepeatChange := False;
+      end;
+    '*':
+      FindWordAtCursor(View, count);
+    '''':
+      FInGotoMark := True;
+    '^':
+      begin
+        FEditPosition.MoveBOL;
+        FEditPosition.MoveCursor(mmSkipWhite);
+      end;
+    '>':
+      begin
+        SavePreviousAction;
+        ChangeIndentation(dForward);
+      end;
+    '<':
+      begin
+        SavePreviousAction;
+        ChangeIndentation(dBack);
+      end;
   end;
   ResetCount;
 end;
@@ -898,11 +904,11 @@ end;
 procedure TViBindings.SavePreviousAction;
 begin
   // TODO: Save the new actions
- FPreviousAction.ActionChar := FChar;
- FPreviousAction.FInDelete := FInDelete;
- FPreviousAction.FInChange := FInChange;
- FPreviousAction.FEditCount := FEditCount;
- FPreviousAction.FCount := FCount;
+  FPreviousAction.ActionChar := FChar;
+  FPreviousAction.FInDelete := FInDelete;
+  FPreviousAction.FInChange := FInChange;
+  FPreviousAction.FEditCount := FEditCount;
+  FPreviousAction.FCount := FCount;
   // self.FPreviousAction.FInsertText := FInsertText;
 end;
 
