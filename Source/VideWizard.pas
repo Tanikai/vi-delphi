@@ -13,6 +13,7 @@ uses
   Winapi.Messages;
 
 type
+
   TVIDEWizard = class(TNotifierObject, IOTAWizard)
   private
     FEvents: TApplicationEvents;
@@ -23,6 +24,7 @@ type
     procedure EditChar(Key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
   public
     constructor Create;
+    destructor Destroy; override;
     function GetIDString: string;
     function GetName: string;
     function GetState: TWizardState;
@@ -30,11 +32,17 @@ type
     procedure BeforeDestruction; override;
   end;
 
-var VideWiz: TVIDEWizard;
+procedure Register;
 
 implementation
 
 uses Vcl.Dialogs;
+
+procedure Register;
+begin
+{$IFDEF CODESITE}CodeSite.TraceMethod('Register', tmoTiming); {$ENDIF}
+  RegisterPackageWizard(TVIDEWizard.Create);
+end;
 
 function IsEditControl(AControl: TComponent): Boolean;
 begin
@@ -55,6 +63,12 @@ begin
   FViBindings := TViBindings.Create;
 end;
 
+destructor TVIDEWizard.Destroy;
+begin
+
+  inherited;
+end;
+
 procedure TVIDEWizard.DoApplicationMessage(var Msg: TMsg; var Handled: Boolean);
 var
   Key: Word;
@@ -72,7 +86,7 @@ begin
       EditChar(Key, ScanCode, Shift, Msg, Handled)
     else
     begin
-      if key = VK_PROCESSKEY then
+      if Key = VK_PROCESSKEY then
         Key := MapVirtualKey(ScanCode, 1);
 
       if Msg.message = WM_KEYDOWN then
