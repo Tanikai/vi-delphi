@@ -3,8 +3,8 @@ library ViDelphiDll_Rio;
 uses
   System.SysUtils,
   System.Classes,
-  VideWizard in 'Source\VideWizard.pas',
-  ViBindings in 'Source\ViBindings.pas';
+  ViDelphiWizard in 'src\ViDelphiWizard.pas',
+  ViEngine in 'src\ViEngine.pas';
 
 {$R *.res}
 

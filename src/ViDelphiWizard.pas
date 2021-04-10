@@ -18,12 +18,12 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 }
 
-unit VideWizard;
+unit ViDelphiWizard;
 
 interface
 
 uses
-  ViBindings,
+  ViEngine,
   Classes,
   System.SysUtils,
   ToolsAPI,
@@ -52,8 +52,8 @@ type
     procedure BeforeDestruction; override;
   end;
 
-// See https://www.davidghoyle.co.uk/WordPress/?page_id=1110 for combined Wizard
-// and DLL .pas file
+  // See https://www.davidghoyle.co.uk/WordPress/?page_id=1110 for combined Wizard
+  // and DLL .pas file
 procedure Register;
 Function InitWizard(Const BorlandIDEServices: IBorlandIDEServices; RegisterProc: TWizardRegisterProc;
   var Terminate: TWizardTerminateProc): Boolean; StdCall;

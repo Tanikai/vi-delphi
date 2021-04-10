@@ -32,7 +32,7 @@ requires
   designide;
 
 contains
-  ViBindings in 'Source\ViBindings.pas',
-  VideWizard in 'Source\VideWizard.pas';
+  ViDelphiWizard in 'src\ViDelphiWizard.pas',
+  ViEngine in 'src\ViEngine.pas';
 
 end.

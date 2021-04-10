@@ -110,8 +110,8 @@
         </DelphiCompile>
         <DCCReference Include="rtl.dcp"/>
         <DCCReference Include="designide.dcp"/>
-        <DCCReference Include="Source\ViBindings.pas"/>
-        <DCCReference Include="Source\VideWizard.pas"/>
+        <DCCReference Include="src\ViDelphiWizard.pas"/>
+        <DCCReference Include="src\ViEngine.pas"/>
         <BuildConfiguration Include="Release">
             <Key>Cfg_2</Key>
             <CfgParent>Base</CfgParent>
