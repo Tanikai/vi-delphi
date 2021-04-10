@@ -28,6 +28,9 @@ uses
   System.SysUtils,
   ToolsAPI,
   Vcl.AppEvnts,
+  Vcl.ActnList,
+  Vcl.ComCtrls,
+  Vcl.Controls,
   Vcl.Forms,
   Winapi.Windows,
   Winapi.Messages;
@@ -38,6 +41,7 @@ type
   private
     FEvents: TApplicationEvents;
     FViBindings: TViBindings;
+    FAction: TAction;
     procedure DoApplicationMessage(var Msg: TMsg; var Handled: Boolean);
   protected
     procedure EditKeyDown(Key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
@@ -50,6 +54,10 @@ type
     function GetState: TWizardState;
     procedure Execute;
     procedure BeforeDestruction; override;
+    procedure AddAction;
+    procedure RemoveActionFromAllToolbars();
+    procedure RemoveActionFromToolbar(AAction: TAction; AToolbar: TToolbar);
+    procedure OnActionClick(Sender: TObject);
   end;
 
   // See https://www.davidghoyle.co.uk/WordPress/?page_id=1110 for combined Wizard
@@ -93,6 +101,21 @@ begin
   Result := (AControl <> nil) and AControl.ClassNameIs('TEditControl') and SameText(AControl.Name, 'Editor');
 end;
 
+// http://docwiki.embarcadero.com/RADStudio/Sydney/en/Adding_an_Action_to_the_Action_List
+procedure TVIDEWizard.AddAction;
+var
+  LService: INTAServices;
+begin
+  if Supports(BorlandIDEServices, INTAServices, LService) then
+  begin
+    FAction := TAction.Create(nil);
+    FAction.Caption := 'ViDelphi';
+    FAction.Category := 'Tools';
+    FAction.OnExecute := OnActionClick;
+    LService.AddActionMenu('', FAction, nil);
+  end;
+end;
+
 procedure TVIDEWizard.BeforeDestruction;
 begin
   inherited;
@@ -105,11 +128,13 @@ begin
   FEvents := TApplicationEvents.Create(nil);
   FEvents.OnMessage := DoApplicationMessage;
   FViBindings := TViBindings.Create;
+  AddAction;
 end;
 
 destructor TVIDEWizard.Destroy;
 begin
-
+  RemoveActionFromAllToolbars;
+  FreeAndNil(FAction);
   inherited;
 end;
 
@@ -167,6 +192,42 @@ end;
 function TVIDEWizard.GetState: TWizardState;
 begin
   Result := [wsEnabled];
+end;
+
+procedure TVIDEWizard.OnActionClick(Sender: TObject);
+begin
+  ShowMessage('Hello world!');
+end;
+
+// http://docwiki.embarcadero.com/RADStudio/Sydney/en/Deleting_Toolbar_Buttons
+procedure TVIDEWizard.RemoveActionFromAllToolbars;
+var
+  LService: INTAServices;
+begin
+  if Supports(BorlandIDEServices, INTAServices, LService) then
+  begin
+    RemoveActionFromToolbar(FAction, LService.ToolBar[sCustomToolBar]);
+    RemoveActionFromToolbar(FAction, LService.ToolBar[sDesktopToolBar]);
+    RemoveActionFromToolbar(FAction, LService.ToolBar[sStandardToolBar]);
+    RemoveActionFromToolbar(FAction, LService.ToolBar[sDebugToolBar]);
+    RemoveActionFromToolbar(FAction, LService.ToolBar[sViewToolBar]);
+  end;
+end;
+
+procedure TVIDEWizard.RemoveActionFromToolbar(AAction: TAction; AToolbar: TToolbar);
+var
+  i: Integer;
+  LButton: TToolButton;
+begin
+  for i := AToolbar.ButtonCount - 1 downto 0 do
+  begin
+    LButton := AToolbar.Buttons[i];
+    if LButton.Action = FAction then
+    begin
+      AToolbar.Perform(CM_CONTROLCHANGE, wParam(LButton), 0);
+      FreeAndNil(LButton);
+    end;
+  end;
 end;
 
 end.
