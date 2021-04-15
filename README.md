@@ -2,7 +2,7 @@
 
 ## About The Project
 
-This package provides Vi keybinds for the Delphi IDE.
+This package provides Vi keybinds for the Delphi IDE. This project is forked from the abandoned [VIDE](https://github.com/petdr/vide) repository.
 
 ## Installation
 
