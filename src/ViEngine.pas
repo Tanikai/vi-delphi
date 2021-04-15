@@ -1,5 +1,5 @@
 {
-  This file contains the implementation of Vi keybinds in the Delphi IDE.
+  This file contains the implementation of Vi keybinds in the Delphi IDE.
 
   Copyright (c) 2016 Peter Ross
   Copyright (C) 2021  Kai Anter
@@ -18,8 +18,8 @@
   along with this program.  If not, see <https://www.gnu.org/licenses/>.
 }
 
-unit ViEngine;
-
+unit ViEngine;
+
 interface
 
 uses
@@ -964,4 +964,3 @@ begin
 end;
 
 end.
-
