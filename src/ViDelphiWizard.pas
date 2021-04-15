@@ -58,6 +58,7 @@ type
     procedure RemoveActionFromAllToolbars();
     procedure RemoveActionFromToolbar(AAction: TAction; AToolbar: TToolbar);
     procedure OnActionClick(Sender: TObject);
+    procedure SetActionCaption(ACaption: String);
   end;
 
   // See https://www.davidghoyle.co.uk/WordPress/?page_id=1110 for combined Wizard
@@ -109,6 +110,7 @@ begin
   if Supports(BorlandIDEServices, INTAServices, LService) then
   begin
     FAction := TAction.Create(nil);
+    FAction.Name := 'ViDelphi';
     FAction.Caption := 'ViDelphi';
     FAction.Category := 'Tools';
     FAction.OnExecute := OnActionClick;
@@ -125,10 +127,11 @@ end;
 
 constructor TVIDEWizard.Create;
 begin
+  AddAction;
   FEvents := TApplicationEvents.Create(nil);
   FEvents.OnMessage := DoApplicationMessage;
   FViBindings := TViBindings.Create;
-  AddAction;
+  FViBindings.onModeChanged := SetActionCaption;
 end;
 
 destructor TVIDEWizard.Destroy;
@@ -196,7 +199,7 @@ end;
 
 procedure TVIDEWizard.OnActionClick(Sender: TObject);
 begin
-  ShowMessage('Hello world!');
+  FViBindings.ToggleActive;
 end;
 
 // http://docwiki.embarcadero.com/RADStudio/Sydney/en/Deleting_Toolbar_Buttons
@@ -228,6 +231,11 @@ begin
       FreeAndNil(LButton);
     end;
   end;
+end;
+
+procedure TVIDEWizard.SetActionCaption(ACaption: String);
+begin
+  FAction.Caption := ACaption;
 end;
 
 end.

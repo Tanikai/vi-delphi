@@ -28,8 +28,21 @@ uses
   Winapi.Windows;
 
 type
+  TP_ModeChanged = reference to procedure(AMode: String);
+
+  TViMode = (mInactive, mNormal, mInsert, mVisual);
+
+  TViModeHelper = record helper for TViMode
+  private const
+    STRINGS: array [0 .. 3] of String = ('Vi: -- INACTIVE --', 'Vi: -- NORMAL --', 'Vi: -- INSERT --',
+      'Vi: -- VISUAL --');
+  public
+    function ToString: string;
+  end;
+
   TDirection = (dForward, dBack);
   TBlockAction = (baDelete, baYank);
+  TViCharClass = (viWhiteSpace, viWord, viSpecial);
 
   TViRegister = record
     IsLine: Boolean;
@@ -45,8 +58,9 @@ type
 
   TViBindings = class(TObject)
   private
-    FInsertMode: Boolean;
-    FActive: Boolean;
+    FEditPosition: IOTAEditPosition;
+    FBuffer: IOTAEditBuffer;
+    FCurrentMode: TViMode;
     FParsingNumber: Boolean;
     FInDelete: Boolean;
     FInChange: Boolean;
@@ -64,8 +78,9 @@ type
     FInYank: Boolean;
     FChar: Char;
     FShift: TShiftState;
-    FEditPosition: IOTAEditPosition;
-    FBuffer: IOTAEditBuffer;
+    FOnModeChanged: TP_ModeChanged;
+
+    { General }
     procedure ChangeIndentation(Direction: TDirection);
     function DeleteSelection: Boolean;
     function GetCount: Integer;
@@ -78,7 +93,6 @@ type
     procedure MoveToMarkPosition;
     procedure Paste(const EditPosition: IOTAEditPosition; const Buffer: IOTAEditBuffer; Direction: TDirection);
     procedure SaveMarkPosition;
-    procedure SetInsertMode(const Value: Boolean);
     function YankSelection: Boolean;
     procedure ApplyActionToBlock(Action: TBlockAction; IsLine: Boolean);
     procedure FindNextWordAtCursor(const count: Integer);
@@ -93,14 +107,18 @@ type
     procedure ProcessYanking;
     procedure SavePreviousAction;
     procedure SwitchToInsertModeOrDoPreviousAction;
+    procedure SetMode(ANewMode: TViMode);
+    procedure SetOnModeChanged(ANewProc: TP_ModeChanged);
   public
     constructor Create;
     procedure EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure ConfigureCursor;
     property count: Integer read GetCount;
-    property InsertMode: Boolean read FInsertMode write SetInsertMode;
-    property Active: Boolean read FActive write FActive;
+    property currentMode: TViMode read FCurrentMode write SetMode;
+    property onModeChanged: TP_ModeChanged read FOnModeChanged write SetOnModeChanged;
+
+    procedure ToggleActive();
   end;
 
 implementation
@@ -109,9 +127,18 @@ uses
   System.SysUtils,
   System.Math;
 
+{ TViModeHelper }
+
+function TViModeHelper.ToString(): string;
+begin
+  result := STRINGS[ord(Self)];
+end;
+
+{ TViBindings }
+
 function QuerySvcs(const Instance: IUnknown; const Intf: TGUID; out Inst): Boolean;
 begin
-  Result := (Instance <> nil) and Supports(Instance, Intf, Inst);
+  result := (Instance <> nil) and Supports(Instance, Intf, Inst);
 end;
 
 function GetEditBuffer: IOTAEditBuffer;
@@ -121,17 +148,17 @@ begin
   QuerySvcs(BorlandIDEServices, IOTAEditorServices, iEditorServices);
   if iEditorServices <> nil then
   begin
-    Result := iEditorServices.GetTopBuffer;
+    result := iEditorServices.GetTopBuffer;
     Exit;
   end;
-  Result := nil;
+  result := nil;
 end;
 
 function GetEditPosition(Buffer: IOTAEditBuffer): IOTAEditPosition;
 begin
-  Result := nil;
+  result := nil;
   if Buffer <> nil then
-    Result := Buffer.GetEditPosition;
+    result := Buffer.GetEditPosition;
 end;
 
 procedure TViBindings.ConfigureCursor;
@@ -140,21 +167,20 @@ var
 begin
   EditBuffer := GetEditBuffer;
   if EditBuffer <> nil then
-    EditBuffer.EditOptions.UseBriefCursorShapes := not FInsertMode;
+    EditBuffer.EditOptions.UseBriefCursorShapes := (currentMode = mNormal) or (currentMode = mVisual);
 end;
 
 constructor TViBindings.Create;
 begin
-  Active := True;
-  InsertMode := False;
+  currentMode := mNormal;
 end;
 
 procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
 begin
-  if not Active then
+  if currentMode = mInactive then
     Exit;
 
-  if InsertMode then
+  if currentMode = mInsert then
     Exit;
 
   FShift := Shift;
@@ -169,22 +195,22 @@ procedure TViBindings.EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: 
   var
     EditBuffer: IOTAEditBuffer;
   begin
-    Result := nil;
+    result := nil;
     EditBuffer := GetEditBuffer;
     if EditBuffer <> nil then
       Exit(EditBuffer.GetTopView);
   end;
 
 begin
-  if not Active then
+  if currentMode = mInactive then
     Exit;
 
-  if InsertMode then
+  if currentMode = mInsert then
   begin
     if (key = VK_ESCAPE) then
     begin
       GetTopMostEditView.Buffer.BufferOptions.InsertMode := True;
-      InsertMode := False;
+      currentMode := mNormal; // Go from Insert back to Normal
       Handled := True;
       Self.FPreviousAction.FInsertText := FInsertText;
       FInsertText := '';
@@ -192,9 +218,9 @@ begin
   end
   else
   begin
-    if (((key >= Ord('A')) and (key <= Ord('Z'))) or ((key >= Ord('0')) and (key <= Ord('9'))) or
+    if (((key >= ord('A')) and (key <= ord('Z'))) or ((key >= ord('0')) and (key <= ord('9'))) or
       ((key >= 186) and (key <= 192)) or ((key >= 219) and (key <= 222))) and not((ssCtrl in Shift) or (ssAlt in Shift))
-      and not InsertMode then
+      and not(currentMode = mInsert) then
     begin
       // If the keydown is a standard keyboard press not altered with a ctrl or alt key
       // then create a WM_CHAR message so we can do all the locale mapping of the keyboard
@@ -211,7 +237,7 @@ begin
   if (FChar = '0') and FParsingNumber then
     Exit(False);
 
-  Result := CharInSet(FChar, ['0', '$', 'b', 'B', 'e', 'E', 'h', 'j', 'k', 'l', 'w', 'W']);
+  result := CharInSet(FChar, ['0', '$', 'b', 'B', 'e', 'E', 'h', 'j', 'k', 'l', 'w', 'W']);
 end;
 
 procedure TViBindings.ResetCount;
@@ -224,11 +250,8 @@ procedure TViBindings.UpdateCount;
 begin
   FParsingNumber := True;
   if CharInSet(FChar, ['0' .. '9']) then
-    FCount := 10 * FCount + (Ord(FChar) - Ord('0'));
+    FCount := 10 * FCount + (ord(FChar) - ord('0'));
 end;
-
-type
-  TViCharClass = (viWhiteSpace, viWord, viSpecial);
 
 procedure TViBindings.ApplyActionToBlock(Action: TBlockAction; IsLine: Boolean);
 var
@@ -311,7 +334,7 @@ begin
   FRegisterArray[FSelectedRegister].IsLine := False;
   FRegisterArray[FSelectedRegister].Text := EditBlock.Text;
   EditBlock.Delete;
-  Result := True;
+  result := True;
 end;
 
 procedure TViBindings.FindNextWordAtCursor(const count: Integer);
@@ -388,12 +411,12 @@ end;
 // TOTAEditPos
 function TViBindings.GetCount: Integer;
 begin
-  Result := IfThen(FCount <= 0, 1, FCount);
+  result := IfThen(FCount <= 0, 1, FCount);
 end;
 
 function TViBindings.GetEditCount: Integer;
 begin
-  Result := IfThen(FEditCount > 0, FEditCount, 1);
+  result := IfThen(FEditCount > 0, FEditCount, 1);
 end;
 
 function TViBindings.GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
@@ -408,15 +431,15 @@ var
     FEditPosition.MoveRelative(0, Col);
     if FEditPosition.IsWhiteSpace or (FEditPosition.Character = #$D) then
     begin
-      Result := viWhiteSpace
+      result := viWhiteSpace
     end
     else if FEditPosition.IsWordCharacter then
     begin
-      Result := viWord;
+      result := viWord;
     end
     else
     begin
-      Result := viSpecial;
+      result := viSpecial;
     end;
     FEditPosition.Restore;
   end;
@@ -542,7 +565,7 @@ begin
   Pos.Line := FEditPosition.Row;
   FEditPosition.Restore;
 
-  Result := Pos;
+  result := Pos;
 end;
 
 procedure TViBindings.HandleChar(const c: Char);
@@ -587,7 +610,7 @@ begin
       FChar := 'E';
     SavePreviousAction;
     ApplyActionToBlock(baDelete, False);
-    InsertMode := True;
+    currentMode := mInsert;
   end;
   FInChange := False;
 end;
@@ -731,7 +754,7 @@ begin
       begin
         // XXX Fix me for '.' command
         FBuffer.BufferOptions.InsertMode := False;
-        InsertMode := True;
+        currentMode := mInsert;
       end;
     's':
       begin
@@ -862,7 +885,7 @@ end;
 
 procedure TViBindings.MoveToMarkPosition;
 begin
-  FEditPosition.Move(FMarkArray[Ord(FChar)].Line, FMarkArray[Ord(FChar)].Col);
+  FEditPosition.Move(FMarkArray[ord(FChar)].Line, FMarkArray[ord(FChar)].Col);
   FInGotoMark := False;
 end;
 
@@ -874,7 +897,7 @@ var
 
   function FixCursorPosition: Boolean;
   begin
-    Result := (not PastingInSelection) and (Direction = dForward);
+    result := (not PastingInSelection) and (Direction = dForward);
   end;
 
 begin
@@ -916,8 +939,8 @@ end;
 
 procedure TViBindings.SaveMarkPosition;
 begin
-  FMarkArray[Ord(FChar)].Col := FEditPosition.Column;
-  FMarkArray[Ord(FChar)].Line := FEditPosition.Row;
+  FMarkArray[ord(FChar)].Col := FEditPosition.Column;
+  FMarkArray[ord(FChar)].Line := FEditPosition.Row;
   FInMark := False;
 end;
 
@@ -932,10 +955,23 @@ begin
   // self.FPreviousAction.FInsertText := FInsertText;
 end;
 
-procedure TViBindings.SetInsertMode(const Value: Boolean);
+procedure TViBindings.SetMode(ANewMode: TViMode);
+var
+  LText: string;
 begin
-  FInsertMode := Value;
+  FCurrentMode := ANewMode;
   ConfigureCursor;
+  if assigned(FOnModeChanged) then
+  begin
+    LText := ANewMode.ToString;
+    FOnModeChanged(LText);
+  end;
+end;
+
+procedure TViBindings.SetOnModeChanged(ANewProc: TP_ModeChanged);
+begin
+  FOnModeChanged := ANewProc;
+  FOnModeChanged(currentMode.ToString); // call new procedure immediately
 end;
 
 procedure TViBindings.SwitchToInsertModeOrDoPreviousAction;
@@ -945,8 +981,16 @@ begin
   else
   begin
     SavePreviousAction;
-    InsertMode := True;
+    currentMode := mInsert;
   end;
+end;
+
+procedure TViBindings.ToggleActive;
+begin
+  if currentMode = mInactive then
+    currentMode := mNormal
+  else
+    currentMode := mInactive;
 end;
 
 function TViBindings.YankSelection: Boolean;
@@ -960,7 +1004,8 @@ begin
   FRegisterArray[FSelectedRegister].IsLine := False;
   FRegisterArray[FSelectedRegister].Text := EditBlock.Text;
   EditBlock.Reset;
-  Result := True;
+  result := True;
 end;
 
 end.
+
