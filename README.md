@@ -49,6 +49,10 @@ It turns out that there isn't much information about debugging Delphi Packages. 
 
 You should now be able to debug the program. Don't forget to switch to the Debug Build Configuration.
 
+## Roadmap
+
+[See Wiki Page](https://github.com/Tanikai/vi-delphi/wiki/Roadmap)
+
 ## License
 
 This project is licensed under GPLv3 (see LICENSE).
