@@ -23,7 +23,10 @@ unit ViEngine;
 interface
 
 uses
-  Classes,
+  System.Classes,
+  System.Generics.Collections,
+  System.SysUtils,
+  System.Math,
   ToolsAPI,
   Winapi.Windows;
 
@@ -39,6 +42,8 @@ type
   public
     function ToString: string;
   end;
+
+  TViEditMode = (emNone, emDelete, emYank, emChange);
 
   TDirection = (dForward, dBack);
   TBlockAction = (baDelete, baYank);
@@ -61,9 +66,13 @@ type
     FEditPosition: IOTAEditPosition;
     FBuffer: IOTAEditBuffer;
     FCurrentMode: TViMode;
-    FParsingNumber: Boolean;
+
+    { TODO : Change to enum }
     FInDelete: Boolean;
     FInChange: Boolean;
+    FInYank: Boolean;
+
+    FParsingNumber: Boolean;
     FInGo: Boolean;
     FInMark: Boolean;
     FInGotoMark: Boolean;
@@ -75,10 +84,12 @@ type
     FInsertText: String;
     FMarkArray: array [0 .. 255] of TOTAEditPos;
     FRegisterArray: array [0 .. 255] of TViRegister;
-    FInYank: Boolean;
+
     FChar: Char;
     FShift: TShiftState;
     FOnModeChanged: TP_ModeChanged;
+    // This Dictionary contains procedure references to the keybinds
+    FViKeybinds: TDictionary<Char, TProc>;
 
     { General }
     procedure ChangeIndentation(Direction: TDirection);
@@ -96,12 +107,11 @@ type
     function YankSelection: Boolean;
     procedure ApplyActionToBlock(Action: TBlockAction; IsLine: Boolean);
     procedure FindNextWordAtCursor(const count: Integer);
-    procedure FindPreviousWordAtCursor;
+    procedure ActionFindPreviousWordAtCursor;
     procedure FindWordAtCursor(const View: IOTAEditView; const count: Integer);
     procedure HandleChar(const c: Char);
     procedure ProcessChange;
     procedure ProcessDeletion;
-    procedure ProcessAction;
     procedure ProcessLineDeletion;
     procedure ProcessLineYanking;
     procedure ProcessYanking;
@@ -109,8 +119,45 @@ type
     procedure SwitchToInsertModeOrDoPreviousAction;
     procedure SetMode(ANewMode: TViMode);
     procedure SetOnModeChanged(ANewProc: TP_ModeChanged);
+
+    // Keybinds
+    procedure ActionAppendEOL;
+    procedure ActionChangeRestOfLine;
+    procedure ActionDeleteRestOfLine;
+    procedure ActionGoToLineNumber;
+    procedure ActionMoveToScreenLine;
+    procedure ActionInsertBeginningOfLine;
+    procedure ActionJoinLines;
+    procedure ActionMoveToBottomScreenLine;
+    procedure ActionMoveToMiddleOfScreen;
+    procedure ActionOpenLineAboveCurrent;
+    procedure ActionPasteBeforeCursor;
+    procedure ActionReplaceCharacters;
+    procedure ActionChangeLines;
+    procedure ActionYankLine;
+    procedure ActionAppend;
+    procedure ActionChange;
+    procedure ActionDelete;
+    procedure ActionJump;
+    procedure ActionInsert;
+    procedure ActionSetMark;
+    procedure ActionRepeatLastScan;
+    procedure ActionOpenLineBelowCurrent;
+    procedure ActionPaste;
+    procedure ActionChangeSingleChar;
+    procedure ActionUndo;
+    procedure ActionDeleteSingleChar;
+    procedure ActionDeleteSingleCharBeforeCursor;
+    procedure ActionYank;
+    procedure ActionAsterisk;
+    procedure ActionShiftLeft;
+    procedure ActionShiftRight;
+    procedure ActionFirstNonWhiteInLine;
+    procedure ActionRepeatLastCommand;
+    procedure ActionMark;
   public
     constructor Create;
+    destructor Destroy; override;
     procedure EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure ConfigureCursor;
@@ -119,13 +166,10 @@ type
     property onModeChanged: TP_ModeChanged read FOnModeChanged write SetOnModeChanged;
 
     procedure ToggleActive();
+    procedure FillViBindings();
   end;
 
 implementation
-
-uses
-  System.SysUtils,
-  System.Math;
 
 { TViModeHelper }
 
@@ -173,6 +217,7 @@ end;
 constructor TViBindings.Create;
 begin
   currentMode := mNormal;
+  FViKeybinds := TDictionary<Char, TProc>.Create;
 end;
 
 procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
@@ -202,34 +247,38 @@ procedure TViBindings.EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: 
   end;
 
 begin
-  if currentMode = mInactive then
-    Exit;
+  case (currentMode) of
+    mInactive:
+      Exit;
+    mNormal:
+      begin
+        if (((key >= ord('A')) and (key <= ord('Z'))) or ((key >= ord('0')) and (key <= ord('9'))) or
+          ((key >= 186) and (key <= 192)) or ((key >= 219) and (key <= 222))) and
+          not((ssCtrl in Shift) or (ssAlt in Shift)) and not(currentMode = mInsert) then
+        begin
+          // If the keydown is a standard keyboard press not altered with a ctrl
+          // or alt key then create a WM_CHAR message so we can do all the
+          // locale mapping of the keyboard and then handle the resulting key in
+          // TViBindings.EditChar.
 
-  if currentMode = mInsert then
-  begin
-    if (key = VK_ESCAPE) then
+          // XXX can we switch to using ToAscii like we do for setting FInsertText
+          TranslateMessage(Msg);
+          Handled := True;
+        end;
+      end;
+  else // Insert or Visual mode
     begin
-      GetTopMostEditView.Buffer.BufferOptions.InsertMode := True;
-      currentMode := mNormal; // Go from Insert back to Normal
-      Handled := True;
-      Self.FPreviousAction.FInsertText := FInsertText;
-      FInsertText := '';
-    end;
-  end
-  else
-  begin
-    if (((key >= ord('A')) and (key <= ord('Z'))) or ((key >= ord('0')) and (key <= ord('9'))) or
-      ((key >= 186) and (key <= 192)) or ((key >= 219) and (key <= 222))) and not((ssCtrl in Shift) or (ssAlt in Shift))
-      and not(currentMode = mInsert) then
-    begin
-      // If the keydown is a standard keyboard press not altered with a ctrl or alt key
-      // then create a WM_CHAR message so we can do all the locale mapping of the keyboard
-      // and then handle the resulting key in TViBindings.EditChar
-      // XXX can we switch to using ToAscii like we do for setting FInsertText
-      TranslateMessage(Msg);
-      Handled := True;
+      if (key = VK_ESCAPE) then
+      begin
+        GetTopMostEditView.Buffer.BufferOptions.InsertMode := True;
+        currentMode := mNormal; // Go from Insert back to Normal
+        Handled := True;
+        Self.FPreviousAction.FInsertText := FInsertText;
+        FInsertText := '';
+      end;
     end;
   end;
+
 end;
 
 function TViBindings.IsMovementKey: Boolean;
@@ -337,6 +386,12 @@ begin
   result := True;
 end;
 
+destructor TViBindings.Destroy;
+begin
+  FreeAndNil(FViKeybinds);
+  inherited;
+end;
+
 procedure TViBindings.FindNextWordAtCursor(const count: Integer);
 var
   EditBlock: IOTAEditBlock;
@@ -356,15 +411,6 @@ begin
     FEditPosition.SearchAgain;
 
   FEditPosition.MoveRelative(0, -Length(FEditPosition.SearchOptions.SearchText));
-end;
-
-procedure TViBindings.FindPreviousWordAtCursor;
-var
-  I: Integer;
-begin
-  FEditPosition.SearchOptions.Direction := sdBackward;
-  for I := 1 to count do
-    FEditPosition.SearchAgain;
 end;
 
 procedure TViBindings.FindWordAtCursor(const View: IOTAEditView; const count: Integer);
@@ -587,7 +633,14 @@ begin
     else if FInYank and (FChar = 'y') then
       ProcessLineYanking
     else
-      ProcessAction;
+    begin
+      try
+        FViKeybinds[c];
+      finally
+        if not FParsingNumber then // nicht am Zählen
+          ResetCount;
+      end;
+    end;
   finally
     // Avoid dangling reference error when closing the IDE
     FBuffer := nil;
@@ -624,216 +677,353 @@ begin
   FInDelete := False;
 end;
 
-procedure TViBindings.ProcessAction;
-var
-  View: IOTAEditView;
+procedure TViBindings.FillViBindings;
 begin
-  View := FBuffer.TopView;
-  case FChar of
-    'a':
-      begin
-        FEditPosition.MoveRelative(0, 1);
-        SwitchToInsertModeOrDoPreviousAction;
-      end;
-    'A':
-      begin
-        FEditPosition.MoveEOL;
-        SwitchToInsertModeOrDoPreviousAction;
-      end;
-    'c':
-      begin
-        if FInChange then
-        begin
-          FEditPosition.MoveBOL;
-          HandleChar('$');
-        end
-        else
-        begin
-          if DeleteSelection then
-            SwitchToInsertModeOrDoPreviousAction
-          else
-          begin
-            FInChange := True;
-            FEditCount := count;
-          end
-        end;
-      end;
-    'C':
-      begin
-        FInChange := True;
-        FEditCount := count;
-        HandleChar('$');
-      end;
-    'd':
-      begin
-        if not DeleteSelection then
-        begin
-          FInDelete := True;
-          FEditCount := count;
-        end;
-      end;
-    'D':
-      begin
-        FInDelete := True;
-        HandleChar('$');
-      end;
-    'g':
-      begin
-        if FInGo then
-        begin
-          FEditPosition.Move(1, 1);
-          FInGo := False;
-        end
-        else
-        begin
-          FInGo := True;
-          FEditCount := count;
-        end
-      end;
-    'G':
-      begin
-        if FParsingNumber then
-          FEditPosition.GotoLine(count)
-        else
-          FEditPosition.MoveEOF;
-      end;
-    'H':
-      begin
-        FEditPosition.Move(FBuffer.TopView.TopRow, 0);
-        FEditPosition.MoveBOL;
-      end;
-    'i':
-      SwitchToInsertModeOrDoPreviousAction;
-    'I':
-      begin
-        FEditPosition.MoveBOL;
-        SwitchToInsertModeOrDoPreviousAction;
-      end;
-    'J':
-      begin
-        FEditPosition.MoveEOL;
-        FEditPosition.Delete(1);
-      end;
-    'L':
-      begin
-        FEditPosition.Move(View.BottomRow - 1, 0);
-        FEditPosition.MoveBOL;
-      end;
-    'm':
-      FInMark := True;
-    'M':
-      begin
-        FEditPosition.Move(View.TopRow + Trunc(((View.BottomRow - 1) - View.TopRow) / 2), 0);
-        FEditPosition.MoveBOL;
-      end;
-    'n':
-      FindNextWordAtCursor(count);
-    'N':
-      FindPreviousWordAtCursor;
-    'o':
-      begin
-        FEditPosition.MoveEOL;
-        FEditPosition.InsertText(#13#10);
-        SwitchToInsertModeOrDoPreviousAction;
-        (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
-      end;
-    'O':
-      begin
-        FEditPosition.MoveBOL;
-        FEditPosition.InsertText(#13#10);
-        FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight);
-        FEditPosition.MoveRelative(-1, 0);
-        SwitchToInsertModeOrDoPreviousAction;
-        (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
-      end;
-    'p':
-      Paste(FEditPosition, FBuffer, dForward);
-    'P':
-      Paste(FEditPosition, FBuffer, dBack);
-    'R':
-      begin
-        // XXX Fix me for '.' command
-        FBuffer.BufferOptions.InsertMode := False;
-        currentMode := mInsert;
-      end;
-    's':
-      begin
-        if not DeleteSelection then
-          FEditPosition.Delete(1);
-        SwitchToInsertModeOrDoPreviousAction;
-      end;
-    'S':
-      begin
-        FInChange := True;
-        FEditPosition.MoveBOL;
-        HandleChar('$');
-      end;
-    'u':
-      FBuffer.Undo;
-    'x':
-      begin
-        if not DeleteSelection then
-        begin
-          FInDelete := True;
-          FEditCount := count - 1;
-          HandleChar('l');
-        end;
-      end;
-    'X':
-      begin
-        FInDelete := True;
-        if DeleteSelection then
-          HandleChar('d')
-        else
-        begin
-          FEditCount := count - 1;
-          HandleChar('h');
-        end
-      end;
-    'y':
-      begin
-        FInYank := not YankSelection;
-        if FInYank then
-          FEditCount := count;
-      end;
-    'Y':
-      begin
-        FInYank := True;
-        FEditCount := count;
-        HandleChar('y');
-      end;
-    '.':
-      begin
-        FInRepeatChange := True;
-        FInDelete := FPreviousAction.FInDelete;
-        FInChange := FPreviousAction.FInChange;
-        FEditCount := FPreviousAction.FEditCount;
-        FCount := FPreviousAction.FCount;
-        HandleChar(FPreviousAction.ActionChar);
-        FInRepeatChange := False;
-      end;
-    '*':
-      FindWordAtCursor(View, count);
-    '''':
-      FInGotoMark := True;
-    '^':
-      begin
-        FEditPosition.MoveBOL;
-        FEditPosition.MoveCursor(mmSkipWhite);
-      end;
-    '>':
-      begin
-        SavePreviousAction;
-        ChangeIndentation(dForward);
-      end;
-    '<':
-      begin
-        SavePreviousAction;
-        ChangeIndentation(dBack);
-      end;
-  end;
-  ResetCount;
+  // FViKeybinds.Add('''', ActionMark);
+  // FViKeybinds.Add('*', ActionAsterisk);
+  FViKeybinds.Add('.', ActionRepeatLastCommand);
+  FViKeybinds.Add('<', ActionShiftLeft);
+  FViKeybinds.Add('>', ActionShiftRight);
+  FViKeybinds.Add('A', ActionAppendEOL);
+  FViKeybinds.Add('C', ActionChangeRestOfLine);
+  FViKeybinds.Add('D', ActionDeleteRestOfLine);
+  FViKeybinds.Add('G', ActionGoToLineNumber);
+  FViKeybinds.Add('H', ActionMoveToScreenLine);
+  FViKeybinds.Add('I', ActionInsertBeginningOfLine);
+  FViKeybinds.Add('J', ActionJoinLines);
+  FViKeybinds.Add('L', ActionMoveToBottomScreenLine);
+  FViKeybinds.Add('M', ActionMoveToMiddleOfScreen);
+  FViKeybinds.Add('N', ActionFindPreviousWordAtCursor);
+  FViKeybinds.Add('O', ActionOpenLineAboveCurrent);
+  FViKeybinds.Add('P', ActionPasteBeforeCursor);
+  FViKeybinds.Add('R', ActionReplaceCharacters);
+  FViKeybinds.Add('S', ActionChangeLines);
+  FViKeybinds.Add('X', ActionDeleteSingleCharBeforeCursor);
+  FViKeybinds.Add('Y', ActionYankLine);
+  FViKeybinds.Add('^', ActionFirstNonWhiteInLine);
+  FViKeybinds.Add('a', ActionAppend);
+  FViKeybinds.Add('c', ActionChange);
+  FViKeybinds.Add('d', ActionDelete);
+  FViKeybinds.Add('g', ActionJump);
+  FViKeybinds.Add('i', ActionInsert);
+  FViKeybinds.Add('m', ActionSetMark);
+  FViKeybinds.Add('n', ActionRepeatLastScan);
+  FViKeybinds.Add('o', ActionOpenLineBelowCurrent);
+  FViKeybinds.Add('p', ActionPaste);
+  FViKeybinds.Add('s', ActionChangeSingleChar);
+  FViKeybinds.Add('u', ActionUndo);
+  FViKeybinds.Add('x', ActionDeleteSingleChar);
+  FViKeybinds.Add('y', ActionYank);
 end;
+
+{ --- BEGIN OF ACTION PROCEDURES --------------------------------------------- }
+
+// '
+procedure TViBindings.ActionMark;
+begin
+  { TODO : I have no idea what this is }
+  FInGotoMark := True;
+end;
+
+// *
+procedure TViBindings.ActionAsterisk;
+begin
+  { TODO : Look for asterisk in vi specification }
+  FindWordAtCursor(FBuffer.TopView, count);
+end;
+
+// .
+procedure TViBindings.ActionRepeatLastCommand;
+begin
+  FInRepeatChange := True;
+  FInDelete := FPreviousAction.FInDelete;
+  FInChange := FPreviousAction.FInChange;
+  FEditCount := FPreviousAction.FEditCount;
+  FCount := FPreviousAction.FCount;
+  HandleChar(FPreviousAction.ActionChar);
+  FInRepeatChange := False;
+end;
+
+// <
+procedure TViBindings.ActionShiftLeft;
+begin
+  SavePreviousAction;
+  ChangeIndentation(dBack);
+end;
+
+// >
+procedure TViBindings.ActionShiftRight;
+begin
+  SavePreviousAction;
+  ChangeIndentation(dForward);
+end;
+
+// A
+procedure TViBindings.ActionAppendEOL;
+begin
+  FEditPosition.MoveEOL;
+  SwitchToInsertModeOrDoPreviousAction;
+end;
+
+// C
+procedure TViBindings.ActionChangeRestOfLine;
+begin
+  FInChange := True;
+  FEditCount := count;
+  HandleChar('$');
+end;
+
+// D
+procedure TViBindings.ActionDeleteRestOfLine;
+begin
+  FInDelete := True;
+  HandleChar('$');
+end;
+
+// G
+procedure TViBindings.ActionGoToLineNumber;
+begin
+  if FParsingNumber then
+    FEditPosition.GotoLine(count)
+  else
+    FEditPosition.MoveEOF;
+end;
+
+// H
+procedure TViBindings.ActionMoveToScreenLine;
+begin
+  { TODO : Support for Count: Move cursor to count'th line displayed on screen }
+  FEditPosition.Move(FBuffer.TopView.TopRow, 0);
+  FEditPosition.MoveBOL;
+end;
+
+// I
+procedure TViBindings.ActionInsertBeginningOfLine;
+begin
+  FEditPosition.MoveBOL;
+  SwitchToInsertModeOrDoPreviousAction;
+end;
+
+// J
+procedure TViBindings.ActionJoinLines;
+begin
+  { TODO : Support for Count: Join multiple lines }
+  FEditPosition.MoveEOL;
+  FEditPosition.Delete(1);
+end;
+
+// L
+procedure TViBindings.ActionMoveToBottomScreenLine;
+begin
+  { TODO : Support for Count: ith a count, to the first non-white of the
+    count'th line from the bottom. Operators affect whole lines when used
+    with L(2.3). }
+  FEditPosition.Move(FBuffer.TopView.BottomRow - 1, 0);
+  FEditPosition.MoveBOL;
+end;
+
+// M
+procedure TViBindings.ActionMoveToMiddleOfScreen;
+var
+  LView: IOTAEditView;
+begin
+  LView := FBuffer.TopView;
+  FEditPosition.Move(LView.TopRow + Trunc(((LView.BottomRow - 1) - LView.TopRow) / 2), 0);
+  FEditPosition.MoveBOL;
+end;
+
+// N
+procedure TViBindings.ActionFindPreviousWordAtCursor;
+var
+  I: Integer;
+begin
+  FEditPosition.SearchOptions.Direction := sdBackward;
+  for I := 1 to count do
+    FEditPosition.SearchAgain;
+end;
+
+// O
+procedure TViBindings.ActionOpenLineAboveCurrent;
+begin
+  FEditPosition.MoveBOL;
+  FEditPosition.InsertText(#13#10);
+  FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight);
+  FEditPosition.MoveRelative(-1, 0);
+  SwitchToInsertModeOrDoPreviousAction;
+  (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
+end;
+
+// P
+procedure TViBindings.ActionPasteBeforeCursor;
+begin
+  Paste(FEditPosition, FBuffer, dBack);
+end;
+
+// R
+procedure TViBindings.ActionReplaceCharacters;
+begin
+  // XXX Fix me for '.' command
+  FBuffer.BufferOptions.InsertMode := False;
+  currentMode := mInsert;
+end;
+
+// S
+procedure TViBindings.ActionChangeLines;
+begin
+  FInChange := True;
+  FEditPosition.MoveBOL;
+  HandleChar('$');
+end;
+
+// X
+procedure TViBindings.ActionDeleteSingleCharBeforeCursor;
+begin
+  FInDelete := True;
+  if DeleteSelection then
+    HandleChar('d')
+  else
+  begin
+    FEditCount := count - 1;
+    HandleChar('h');
+  end
+end;
+
+// Y
+procedure TViBindings.ActionYankLine;
+begin
+  FInYank := True;
+  FEditCount := count;
+  HandleChar('y');
+end;
+
+// ^
+procedure TViBindings.ActionFirstNonWhiteInLine;
+begin
+  FEditPosition.MoveBOL;
+  FEditPosition.MoveCursor(mmSkipWhite);
+end;
+
+// a
+procedure TViBindings.ActionAppend;
+begin
+  FEditPosition.MoveRelative(0, 1);
+  SwitchToInsertModeOrDoPreviousAction;
+end;
+
+// c
+procedure TViBindings.ActionChange;
+begin
+  if FInChange then
+  begin
+    FEditPosition.MoveBOL;
+    HandleChar('$');
+  end
+  else
+  begin
+    if DeleteSelection then
+      SwitchToInsertModeOrDoPreviousAction
+    else
+    begin
+      FInChange := True;
+      FEditCount := count;
+    end
+  end;
+end;
+
+// d
+procedure TViBindings.ActionDelete;
+begin
+  if not DeleteSelection then
+  begin
+    FInDelete := True;
+    FEditCount := count;
+  end;
+end;
+
+// g
+procedure TViBindings.ActionJump;
+begin
+  { TODO : Look for better name of this function }
+  if FInGo then
+  begin
+    FEditPosition.Move(1, 1);
+    FInGo := False;
+  end
+  else
+  begin
+    FInGo := True;
+    FEditCount := count;
+  end
+end;
+
+// i
+procedure TViBindings.ActionInsert;
+begin
+  SwitchToInsertModeOrDoPreviousAction;
+end;
+
+// m
+procedure TViBindings.ActionSetMark;
+begin
+  FInMark := True;
+end;
+
+// n
+procedure TViBindings.ActionRepeatLastScan;
+begin
+  { TODO : Look for better function name }
+  FindNextWordAtCursor(count);
+end;
+
+// o
+procedure TViBindings.ActionOpenLineBelowCurrent;
+begin
+  FEditPosition.MoveEOL;
+  FEditPosition.InsertText(#13#10);
+  SwitchToInsertModeOrDoPreviousAction;
+  (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
+end;
+
+// p
+procedure TViBindings.ActionPaste;
+begin
+  Paste(FEditPosition, FBuffer, dForward);
+end;
+
+// s
+procedure TViBindings.ActionChangeSingleChar;
+begin
+  if not DeleteSelection then
+    FEditPosition.Delete(1);
+  SwitchToInsertModeOrDoPreviousAction;
+end;
+
+// u
+procedure TViBindings.ActionUndo;
+begin
+  FBuffer.Undo;
+end;
+
+// x
+procedure TViBindings.ActionDeleteSingleChar;
+begin
+  if not DeleteSelection then
+  begin
+    FInDelete := True;
+    FEditCount := count - 1;
+    HandleChar('l');
+  end;
+end;
+
+// y
+procedure TViBindings.ActionYank;
+begin
+  FInYank := not YankSelection;
+  if FInYank then
+    FEditCount := count;
+end;
+
+{ ---------------------------------------------------------------------------- }
 
 procedure TViBindings.ProcessLineDeletion;
 begin
@@ -1008,4 +1198,3 @@ begin
 end;
 
 end.
-
