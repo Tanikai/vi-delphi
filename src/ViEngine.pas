@@ -218,6 +218,7 @@ constructor TViBindings.Create;
 begin
   currentMode := mNormal;
   FViKeybinds := TDictionary<Char, TProc>.Create;
+  FillViBindings;
 end;
 
 procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
@@ -628,14 +629,10 @@ begin
       ProcessMovement
     else if CharInSet(FChar, ['0' .. '9']) then
       UpdateCount
-    else if (FInDelete and (FChar = 'd')) then
-      ProcessLineDeletion
-    else if FInYank and (FChar = 'y') then
-      ProcessLineYanking
     else
     begin
       try
-        FViKeybinds[c];
+        FViKeybinds[c]();
       finally
         if not FParsingNumber then // nicht am Zählen
           ResetCount;
