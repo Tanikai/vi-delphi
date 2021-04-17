@@ -56,7 +56,7 @@ type
 
   TViAction = record
     ActionChar: Char;
-    FInDelete, FInChange: Boolean;
+    FCurrentEditMode: TViEditMode;
     FEditCount, FCount: Integer;
     FInsertText: string;
   end;
@@ -65,12 +65,8 @@ type
   private
     FEditPosition: IOTAEditPosition;
     FBuffer: IOTAEditBuffer;
-    FCurrentMode: TViMode;
-
-    { TODO : Change to enum }
-    FInDelete: Boolean;
-    FInChange: Boolean;
-    FInYank: Boolean;
+    FCurrentViMode: TViMode;
+    FCurrentEditMode: TViEditMode;
 
     FParsingNumber: Boolean;
     FInGo: Boolean;
@@ -117,7 +113,7 @@ type
     procedure ProcessYanking;
     procedure SavePreviousAction;
     procedure SwitchToInsertModeOrDoPreviousAction;
-    procedure SetMode(ANewMode: TViMode);
+    procedure SetViMode(ANewMode: TViMode);
     procedure SetOnModeChanged(ANewProc: TP_ModeChanged);
 
     // Keybinds
@@ -162,7 +158,8 @@ type
     procedure EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure ConfigureCursor;
     property count: Integer read GetCount;
-    property currentMode: TViMode read FCurrentMode write SetMode;
+    property currentViMode: TViMode read FCurrentViMode write SetViMode;
+    property currentEditMode: TViEditMode read FCurrentEditMode write FCurrentEditMode;
     property onModeChanged: TP_ModeChanged read FOnModeChanged write SetOnModeChanged;
 
     procedure ToggleActive();
@@ -211,22 +208,23 @@ var
 begin
   EditBuffer := GetEditBuffer;
   if EditBuffer <> nil then
-    EditBuffer.EditOptions.UseBriefCursorShapes := (currentMode = mNormal) or (currentMode = mVisual);
+    EditBuffer.EditOptions.UseBriefCursorShapes := (currentViMode = mNormal) or (currentViMode = mVisual);
 end;
 
 constructor TViBindings.Create;
 begin
-  currentMode := mNormal;
+  currentViMode := mNormal;
+  currentEditMode := emNone;
   FViKeybinds := TDictionary<Char, TProc>.Create;
   FillViBindings;
 end;
 
 procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
 begin
-  if currentMode = mInactive then
+  if currentViMode = mInactive then
     Exit;
 
-  if currentMode = mInsert then
+  if currentViMode = mInsert then
     Exit;
 
   FShift := Shift;
@@ -248,14 +246,14 @@ procedure TViBindings.EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: 
   end;
 
 begin
-  case (currentMode) of
+  case (currentViMode) of
     mInactive:
       Exit;
     mNormal:
       begin
         if (((key >= ord('A')) and (key <= ord('Z'))) or ((key >= ord('0')) and (key <= ord('9'))) or
           ((key >= 186) and (key <= 192)) or ((key >= 219) and (key <= 222))) and
-          not((ssCtrl in Shift) or (ssAlt in Shift)) and not(currentMode = mInsert) then
+          not((ssCtrl in Shift) or (ssAlt in Shift)) and not(currentViMode = mInsert) then
         begin
           // If the keydown is a standard keyboard press not altered with a ctrl
           // or alt key then create a WM_CHAR message so we can do all the
@@ -272,8 +270,10 @@ begin
       if (key = VK_ESCAPE) then
       begin
         GetTopMostEditView.Buffer.BufferOptions.InsertMode := True;
-        currentMode := mNormal; // Go from Insert back to Normal
+        currentViMode := mNormal; // Go from Insert back to Normal
         Handled := True;
+
+        // Save inserted text
         Self.FPreviousAction.FInsertText := FInsertText;
         FInsertText := '';
       end;
@@ -501,7 +501,7 @@ begin
       begin
         FEditPosition.MoveEOL;
         // When moving, must stop at last char, not on line break.
-        if (not FInDelete) and (not FInChange) and (not FInYank) then
+        if currentEditMode = emNone then
           FEditPosition.MoveRelative(0, -1);
       end;
     'b':
@@ -660,9 +660,9 @@ begin
       FChar := 'E';
     SavePreviousAction;
     ApplyActionToBlock(baDelete, False);
-    currentMode := mInsert;
+    currentViMode := mInsert;
   end;
-  FInChange := False;
+  currentEditMode := emNone;
 end;
 
 procedure TViBindings.ProcessDeletion;
@@ -671,7 +671,7 @@ begin
     SavePreviousAction;
 
   ApplyActionToBlock(baDelete, False);
-  FInDelete := False;
+  currentEditMode := emNone;
 end;
 
 procedure TViBindings.FillViBindings;
@@ -733,8 +733,7 @@ end;
 procedure TViBindings.ActionRepeatLastCommand;
 begin
   FInRepeatChange := True;
-  FInDelete := FPreviousAction.FInDelete;
-  FInChange := FPreviousAction.FInChange;
+  currentEditMode := FPreviousAction.FCurrentEditMode;
   FEditCount := FPreviousAction.FEditCount;
   FCount := FPreviousAction.FCount;
   HandleChar(FPreviousAction.ActionChar);
@@ -765,7 +764,7 @@ end;
 // C
 procedure TViBindings.ActionChangeRestOfLine;
 begin
-  FInChange := True;
+  currentEditMode := emChange;
   FEditCount := count;
   HandleChar('$');
 end;
@@ -773,7 +772,7 @@ end;
 // D
 procedure TViBindings.ActionDeleteRestOfLine;
 begin
-  FInDelete := True;
+  currentEditMode := emDelete;
   HandleChar('$');
 end;
 
@@ -861,13 +860,13 @@ procedure TViBindings.ActionReplaceCharacters;
 begin
   // XXX Fix me for '.' command
   FBuffer.BufferOptions.InsertMode := False;
-  currentMode := mInsert;
+  currentViMode := mInsert;
 end;
 
 // S
 procedure TViBindings.ActionChangeLines;
 begin
-  FInChange := True;
+  currentEditMode := emChange;
   FEditPosition.MoveBOL;
   HandleChar('$');
 end;
@@ -875,7 +874,7 @@ end;
 // X
 procedure TViBindings.ActionDeleteSingleCharBeforeCursor;
 begin
-  FInDelete := True;
+  currentEditMode := emDelete;
   if DeleteSelection then
     HandleChar('d')
   else
@@ -888,7 +887,7 @@ end;
 // Y
 procedure TViBindings.ActionYankLine;
 begin
-  FInYank := True;
+  currentEditMode := emYank;
   FEditCount := count;
   HandleChar('y');
 end;
@@ -910,7 +909,7 @@ end;
 // c
 procedure TViBindings.ActionChange;
 begin
-  if FInChange then
+  if currentEditMode = emChange then
   begin
     FEditPosition.MoveBOL;
     HandleChar('$');
@@ -921,7 +920,7 @@ begin
       SwitchToInsertModeOrDoPreviousAction
     else
     begin
-      FInChange := True;
+      currentEditMode := emChange;
       FEditCount := count;
     end
   end;
@@ -930,13 +929,13 @@ end;
 // d
 procedure TViBindings.ActionDelete;
 begin
-  if FInDelete then
+  if currentEditMode = emDelete then
   begin
     ProcessLineDeletion;
   end
   else if not DeleteSelection then
   begin
-    FInDelete := True;
+    currentEditMode := emDelete;
     FEditCount := count;
   end;
 end;
@@ -1010,7 +1009,7 @@ procedure TViBindings.ActionDeleteSingleChar;
 begin
   if not DeleteSelection then
   begin
-    FInDelete := True;
+    currentEditMode := emDelete;
     FEditCount := count - 1;
     HandleChar('l');
   end;
@@ -1019,12 +1018,16 @@ end;
 // y
 procedure TViBindings.ActionYank;
 begin
-  if FInYank then
+  if currentEditMode = emYank then
     ProcessLineYanking
   else
   begin
-    FInYank := not YankSelection;
-    if FInYank then
+    if not YankSelection() then
+      currentEditMode := emYank
+    else
+      currentEditMode := emNone;
+
+    if currentEditMode = emYank then
       FEditCount := count;
   end;
 end;
@@ -1039,7 +1042,7 @@ begin
   FEditPosition.MoveBOL;
   FChar := 'j';
   ApplyActionToBlock(baDelete, True);
-  FInDelete := False;
+  currentEditMode := emNone;
 end;
 
 procedure TViBindings.ProcessLineYanking;
@@ -1049,25 +1052,28 @@ begin
   FChar := 'j';
   ApplyActionToBlock(baYank, True);
   FEditPosition.Restore;
-  FInYank := False;
+  currentEditMode := emNone;
 end;
 
 procedure TViBindings.ProcessMovement;
 var
   Pos: TOTAEditPos;
 begin
-  if FInDelete then
-    ProcessDeletion
-  else if FInChange then
-    ProcessChange
-  else if FInYank then
-    ProcessYanking
-  else
-  begin
-    Pos := GetPositionForMove(FChar, GetCount);
-    FEditPosition.Move(Pos.Line, Pos.Col);
-    FInGo := False;
+  case currentEditMode of
+    emNone:
+      begin
+        Pos := GetPositionForMove(FChar, GetCount);
+        FEditPosition.Move(Pos.Line, Pos.Col);
+        FInGo := False;
+      end;
+    emDelete:
+      ProcessDeletion;
+    emYank:
+      ProcessYanking;
+    emChange:
+      ProcessChange;
   end;
+
   ResetCount;
 end;
 
@@ -1076,7 +1082,7 @@ begin
   FEditPosition.Save;
   ApplyActionToBlock(baYank, False);
   FEditPosition.Restore;
-  FInYank := False;
+  currentEditMode := emNone;
 end;
 
 procedure TViBindings.MoveToMarkPosition;
@@ -1144,18 +1150,17 @@ procedure TViBindings.SavePreviousAction;
 begin
   // TODO: Save the new actions
   FPreviousAction.ActionChar := FChar;
-  FPreviousAction.FInDelete := FInDelete;
-  FPreviousAction.FInChange := FInChange;
+  FPreviousAction.FCurrentEditMode := currentEditMode;
   FPreviousAction.FEditCount := FEditCount;
   FPreviousAction.FCount := FCount;
   // self.FPreviousAction.FInsertText := FInsertText;
 end;
 
-procedure TViBindings.SetMode(ANewMode: TViMode);
+procedure TViBindings.SetViMode(ANewMode: TViMode);
 var
   LText: string;
 begin
-  FCurrentMode := ANewMode;
+  FCurrentViMode := ANewMode;
   ConfigureCursor;
   if assigned(FOnModeChanged) then
   begin
@@ -1167,7 +1172,7 @@ end;
 procedure TViBindings.SetOnModeChanged(ANewProc: TP_ModeChanged);
 begin
   FOnModeChanged := ANewProc;
-  FOnModeChanged(currentMode.ToString); // call new procedure immediately
+  FOnModeChanged(currentViMode.ToString); // call new procedure immediately
 end;
 
 procedure TViBindings.SwitchToInsertModeOrDoPreviousAction;
@@ -1177,16 +1182,16 @@ begin
   else
   begin
     SavePreviousAction;
-    currentMode := mInsert;
+    currentViMode := mInsert;
   end;
 end;
 
 procedure TViBindings.ToggleActive;
 begin
-  if currentMode = mInactive then
-    currentMode := mNormal
+  if currentViMode = mInactive then
+    currentViMode := mNormal
   else
-    currentMode := mInactive;
+    currentViMode := mInactive;
 end;
 
 function TViBindings.YankSelection: Boolean;
