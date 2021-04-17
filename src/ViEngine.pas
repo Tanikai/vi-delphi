@@ -930,7 +930,11 @@ end;
 // d
 procedure TViBindings.ActionDelete;
 begin
-  if not DeleteSelection then
+  if FInDelete then
+  begin
+    ProcessLineDeletion;
+  end
+  else if not DeleteSelection then
   begin
     FInDelete := True;
     FEditCount := count;
@@ -1015,9 +1019,14 @@ end;
 // y
 procedure TViBindings.ActionYank;
 begin
-  FInYank := not YankSelection;
   if FInYank then
-    FEditCount := count;
+    ProcessLineYanking
+  else
+  begin
+    FInYank := not YankSelection;
+    if FInYank then
+      FEditCount := count;
+  end;
 end;
 
 { ---------------------------------------------------------------------------- }
