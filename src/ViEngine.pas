@@ -68,6 +68,8 @@ type
     FCurrentViMode: TViMode;
     FCurrentEditMode: TViEditMode;
 
+    FMovementCount: Integer;
+
     FInGo: Boolean;
     FInMark: Boolean;
     FInGotoMark: Boolean;
@@ -94,7 +96,7 @@ type
     function GetEditCount: Integer;
     procedure ResetCount;
     procedure ActionUpdateCount;
-    function GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
+    function GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
     procedure ProcessMovement;
     procedure MoveToMarkPosition;
     procedure Paste(const EditPosition: IOTAEditPosition; const Buffer: IOTAEditBuffer; Direction: TDirection);
@@ -152,6 +154,8 @@ type
     procedure ActionRepeatLastCommand;
     procedure ActionMark;
     function CharAtRelativeLocation(Col: Integer): TViCharClass;
+
+    // Movement
     procedure ActionMoveBOLorCount;
     procedure ActionMoveEOL;
     procedure ActionMoveWordBack;
@@ -192,6 +196,22 @@ end;
 
 { TViBindings }
 
+constructor TViBindings.Create;
+begin
+  currentViMode := mNormal;
+  currentEditMode := emNone;
+  FViKeybinds := TDictionary<Char, TProc>.Create;
+  FViMoveKeybinds := TDictionary<Char, TProc>.Create;
+  FillViBindings;
+end;
+
+destructor TViBindings.Destroy;
+begin
+  FreeAndNil(FViKeybinds);
+  FreeAndNil(FViMoveKeybinds);
+  inherited;
+end;
+
 function QuerySvcs(const Instance: IUnknown; const Intf: TGUID; out Inst): Boolean;
 begin
   result := (Instance <> nil) and Supports(Instance, Intf, Inst);
@@ -224,15 +244,6 @@ begin
   EditBuffer := GetEditBuffer;
   if EditBuffer <> nil then
     EditBuffer.EditOptions.UseBriefCursorShapes := (currentViMode = mNormal) or (currentViMode = mVisual);
-end;
-
-constructor TViBindings.Create;
-begin
-  currentViMode := mNormal;
-  currentEditMode := emNone;
-  FViKeybinds := TDictionary<Char, TProc>.Create;
-  FViMoveKeybinds := TDictionary<Char, TProc>.Create;
-  FillViBindings;
 end;
 
 procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
@@ -405,13 +416,6 @@ begin
   result := True;
 end;
 
-destructor TViBindings.Destroy;
-begin
-  FreeAndNil(FViKeybinds);
-  FreeAndNil(FViMoveKeybinds);
-  inherited;
-end;
-
 procedure TViBindings.FindNextWordAtCursor(const count: Integer);
 var
   EditBlock: IOTAEditBlock;
@@ -490,14 +494,15 @@ begin
   result := (FCount > 0);
 end;
 
-function TViBindings.GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
+function TViBindings.GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
 var
   Pos: TOTAEditPos;
 begin
+  FMovementCount := ACount;
   FEditPosition.Save;
 
-  if FViMoveKeybinds.ContainsKey(key) then
-    FViMoveKeybinds[key]();
+  if FViMoveKeybinds.ContainsKey(AKey) then
+    FViMoveKeybinds[AKey]();
 
   Pos.Col := FEditPosition.Column;
   Pos.Line := FEditPosition.Row;
@@ -690,7 +695,7 @@ procedure TViBindings.ActionMoveNonWhitespaceBack;
 var
   I: Integer;
 begin
-  for I := 1 to count do
+  for I := 1 to FMovementCount do
   begin
     FEditPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
     FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipLeft);
@@ -717,7 +722,7 @@ procedure TViBindings.ActionMoveToEndOfWord;
 var
   I: Integer;
 begin
-  for I := 1 to count do
+  for I := 1 to FMovementCount do
   begin
     if (FEditPosition.IsWordCharacter or FEditPosition.IsSpecialCharacter) and (CharAtRelativeLocation(1) = viWhiteSpace)
     then
@@ -831,7 +836,7 @@ procedure TViBindings.ActionMoveToNextCharacterWord;
 var
   I: Integer;
 begin
-  for I := 1 to count do
+  for I := 1 to FMovementCount do
   begin
     // Goto first white space after the end of the word.
     FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
@@ -881,7 +886,7 @@ var
   I: Integer;
   LNextChar: TViCharClass;
 begin
-  for I := 1 to count do
+  for I := 1 to FMovementCount do
   begin
     LNextChar := CharAtRelativeLocation(-1);
     if FEditPosition.IsWordCharacter and ((LNextChar = viSpecial) or (LNextChar = viWhiteSpace)) then
@@ -943,7 +948,7 @@ var
   I: Integer;
   LNextChar: TViCharClass;
 begin
-  for I := 1 to count do
+  for I := 1 to FMovementCount do
   begin
     LNextChar := CharAtRelativeLocation(1);
     if (FEditPosition.IsWordCharacter and (LNextChar = viWhiteSpace) or (LNextChar = viSpecial)) then
@@ -984,7 +989,7 @@ end;
 // h
 procedure TViBindings.ActionMoveLeft;
 begin
-  FEditPosition.MoveRelative(0, -count);
+  FEditPosition.MoveRelative(0, -FMovementCount);
 end;
 
 // i
@@ -996,19 +1001,19 @@ end;
 // j
 procedure TViBindings.ActionMoveDown;
 begin
-  FEditPosition.MoveRelative(+count, 0);
+  FEditPosition.MoveRelative(+FMovementCount, 0);
 end;
 
 // k
 procedure TViBindings.ActionMoveUp;
 begin
-  FEditPosition.MoveRelative(-count, 0);
+  FEditPosition.MoveRelative(-FMovementCount, 0);
 end;
 
 // l
 procedure TViBindings.ActionMoveRight;
 begin
-  FEditPosition.MoveRelative(0, +count);
+  FEditPosition.MoveRelative(0, +FMovementCount);
 end;
 
 // m
@@ -1058,7 +1063,7 @@ procedure TViBindings.ActionMoveToBeginningOfNextWord;
 var
   I: Integer;
 begin
-  for I := 1 to count do
+  for I := 1 to FMovementCount do
   begin
     if FEditPosition.IsWordCharacter then
       FEditPosition.MoveCursor(mmSkipWord or mmSkipRight) // Skip to first non word character.
