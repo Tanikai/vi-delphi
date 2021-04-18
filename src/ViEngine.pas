@@ -311,6 +311,13 @@ begin
           // XXX can we switch to using ToAscii like we do for setting FInsertText
           TranslateMessage(Msg);
           Handled := True;
+        end
+        else if (key = VK_ESCAPE) then // cancel all current commands
+        begin
+          currentViMode := mNormal;
+          currentEditMode := emNone;
+          ResetCount;
+          Handled := True;
         end;
       end;
   else // Insert or Visual mode
