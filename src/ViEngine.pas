@@ -68,7 +68,6 @@ type
     FCurrentViMode: TViMode;
     FCurrentEditMode: TViEditMode;
 
-    FParsingNumber: Boolean;
     FInGo: Boolean;
     FInMark: Boolean;
     FInGotoMark: Boolean;
@@ -93,7 +92,7 @@ type
     function GetCount: Integer;
     function GetEditCount: Integer;
     procedure ResetCount;
-    procedure UpdateCount;
+    procedure ActionUpdateCount;
     function GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
     procedure ProcessMovement;
     function IsMovementKey: Boolean;
@@ -115,6 +114,7 @@ type
     procedure SwitchToInsertModeOrDoPreviousAction;
     procedure SetViMode(ANewMode: TViMode);
     procedure SetOnModeChanged(ANewProc: TP_ModeChanged);
+    function GetHasCountInput: Boolean;
 
     // Keybinds
     procedure ActionAppendEOL;
@@ -151,6 +151,7 @@ type
     procedure ActionFirstNonWhiteInLine;
     procedure ActionRepeatLastCommand;
     procedure ActionMark;
+
   public
     constructor Create;
     destructor Destroy; override;
@@ -158,6 +159,7 @@ type
     procedure EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure ConfigureCursor;
     property count: Integer read GetCount;
+    property hasCountInput: Boolean read GetHasCountInput;
     property currentViMode: TViMode read FCurrentViMode write SetViMode;
     property currentEditMode: TViEditMode read FCurrentEditMode write FCurrentEditMode;
     property onModeChanged: TP_ModeChanged read FOnModeChanged write SetOnModeChanged;
@@ -279,12 +281,11 @@ begin
       end;
     end;
   end;
-
 end;
 
 function TViBindings.IsMovementKey: Boolean;
 begin
-  if (FChar = '0') and FParsingNumber then
+  if (FChar = '0') and hasCountInput then
     Exit(False);
 
   result := CharInSet(FChar, ['0', '$', 'b', 'B', 'e', 'E', 'h', 'j', 'k', 'l', 'w', 'W']);
@@ -293,14 +294,6 @@ end;
 procedure TViBindings.ResetCount;
 begin
   FCount := 0;
-  FParsingNumber := False;
-end;
-
-procedure TViBindings.UpdateCount;
-begin
-  FParsingNumber := True;
-  if CharInSet(FChar, ['0' .. '9']) then
-    FCount := 10 * FCount + (ord(FChar) - ord('0'));
 end;
 
 procedure TViBindings.ApplyActionToBlock(Action: TBlockAction; IsLine: Boolean);
@@ -466,6 +459,11 @@ begin
   result := IfThen(FEditCount > 0, FEditCount, 1);
 end;
 
+function TViBindings.GetHasCountInput: Boolean;
+begin
+  result := (FCount > 0);
+end;
+
 function TViBindings.GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
 var
   Pos: TOTAEditPos;
@@ -628,15 +626,15 @@ begin
     else if IsMovementKey then
       ProcessMovement
     else if CharInSet(FChar, ['0' .. '9']) then
-      UpdateCount
+      ActionUpdateCount
     else
     begin
       try
         FViKeybinds[c]();
-      finally
-        if not FParsingNumber then // nicht am Zählen
-          ResetCount;
+      except
+        // do nothing
       end;
+      ResetCount;
     end;
   finally
     // Avoid dangling reference error when closing the IDE
@@ -675,10 +673,14 @@ begin
 end;
 
 procedure TViBindings.FillViBindings;
+var
+  I: Integer;
 begin
   // FViKeybinds.Add('''', ActionMark);
   // FViKeybinds.Add('*', ActionAsterisk);
   FViKeybinds.Add('.', ActionRepeatLastCommand);
+  for I := 1 to 9 do
+    FViKeybinds.Add(Char(ord(0) + I), ActionUpdateCount);
   FViKeybinds.Add('<', ActionShiftLeft);
   FViKeybinds.Add('>', ActionShiftRight);
   FViKeybinds.Add('A', ActionAppendEOL);
@@ -740,6 +742,12 @@ begin
   FInRepeatChange := False;
 end;
 
+// 1-9
+procedure TViBindings.ActionUpdateCount;
+begin
+  FCount := 10 * FCount + (ord(FChar) - ord('0'));
+end;
+
 // <
 procedure TViBindings.ActionShiftLeft;
 begin
@@ -779,7 +787,7 @@ end;
 // G
 procedure TViBindings.ActionGoToLineNumber;
 begin
-  if FParsingNumber then
+  if hasCountInput then
     FEditPosition.GotoLine(count)
   else
     FEditPosition.MoveEOF;
