@@ -85,6 +85,7 @@ type
     FOnModeChanged: TP_ModeChanged;
     // This Dictionary contains procedure references to the keybinds
     FViKeybinds: TDictionary<Char, TProc>;
+    FViMoveKeybinds: TDictionary<Char, TProc>;
 
     { General }
     procedure ChangeIndentation(Direction: TDirection);
@@ -95,7 +96,6 @@ type
     procedure ActionUpdateCount;
     function GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
     procedure ProcessMovement;
-    function IsMovementKey: Boolean;
     procedure MoveToMarkPosition;
     procedure Paste(const EditPosition: IOTAEditPosition; const Buffer: IOTAEditBuffer; Direction: TDirection);
     procedure SaveMarkPosition;
@@ -151,6 +151,19 @@ type
     procedure ActionFirstNonWhiteInLine;
     procedure ActionRepeatLastCommand;
     procedure ActionMark;
+    function CharAtRelativeLocation(Col: Integer): TViCharClass;
+    procedure ActionMoveBOLorCount;
+    procedure ActionMoveEOL;
+    procedure ActionMoveWordBack;
+    procedure ActionMoveNonWhitespaceBack;
+    procedure ActionMoveEndOfNextWord;
+    procedure ActionMoveToEndOfWord;
+    procedure ActionMoveLeft;
+    procedure ActionMoveDown;
+    procedure ActionMoveUp;
+    procedure ActionMoveRight;
+    procedure ActionMoveToBeginningOfNextWord;
+    procedure ActionMoveToNextCharacterWord;
 
   public
     constructor Create;
@@ -218,6 +231,7 @@ begin
   currentViMode := mNormal;
   currentEditMode := emNone;
   FViKeybinds := TDictionary<Char, TProc>.Create;
+  FViMoveKeybinds := TDictionary<Char, TProc>.Create;
   FillViBindings;
 end;
 
@@ -233,6 +247,25 @@ begin
   HandleChar(Chr(key));
   Handled := True;
   (BorlandIDEServices As IOTAEditorServices).TopView.Paint;
+end;
+
+function TViBindings.CharAtRelativeLocation(Col: Integer): TViCharClass;
+begin
+  FEditPosition.Save;
+  FEditPosition.MoveRelative(0, Col);
+  if FEditPosition.IsWhiteSpace or (FEditPosition.Character = #$D) then
+  begin
+    result := viWhiteSpace
+  end
+  else if FEditPosition.IsWordCharacter then
+  begin
+    result := viWord;
+  end
+  else
+  begin
+    result := viSpecial;
+  end;
+  FEditPosition.Restore;
 end;
 
 procedure TViBindings.EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
@@ -281,14 +314,6 @@ begin
       end;
     end;
   end;
-end;
-
-function TViBindings.IsMovementKey: Boolean;
-begin
-  if (FChar = '0') and hasCountInput then
-    Exit(False);
-
-  result := CharInSet(FChar, ['0', '$', 'b', 'B', 'e', 'E', 'h', 'j', 'k', 'l', 'w', 'W']);
 end;
 
 procedure TViBindings.ResetCount;
@@ -383,6 +408,7 @@ end;
 destructor TViBindings.Destroy;
 begin
   FreeAndNil(FViKeybinds);
+  FreeAndNil(FViMoveKeybinds);
   inherited;
 end;
 
@@ -467,144 +493,11 @@ end;
 function TViBindings.GetPositionForMove(key: Char; count: Integer = 0): TOTAEditPos;
 var
   Pos: TOTAEditPos;
-  I: Integer;
-  nextChar: TViCharClass;
-
-  function CharAtRelativeLocation(Col: Integer): TViCharClass;
-  begin
-    FEditPosition.Save;
-    FEditPosition.MoveRelative(0, Col);
-    if FEditPosition.IsWhiteSpace or (FEditPosition.Character = #$D) then
-    begin
-      result := viWhiteSpace
-    end
-    else if FEditPosition.IsWordCharacter then
-    begin
-      result := viWord;
-    end
-    else
-    begin
-      result := viSpecial;
-    end;
-    FEditPosition.Restore;
-  end;
-
 begin
   FEditPosition.Save;
 
-  case key of
-    '0':
-      FEditPosition.MoveBOL;
-    '$':
-      begin
-        FEditPosition.MoveEOL;
-        // When moving, must stop at last char, not on line break.
-        if currentEditMode = emNone then
-          FEditPosition.MoveRelative(0, -1);
-      end;
-    'b':
-      begin
-        for I := 1 to count do
-        begin
-          nextChar := CharAtRelativeLocation(-1);
-          if FEditPosition.IsWordCharacter and ((nextChar = viSpecial) or (nextChar = viWhiteSpace)) then
-            FEditPosition.MoveRelative(0, -1);
-
-          if FEditPosition.IsSpecialCharacter and ((nextChar = viWord) or (nextChar = viWhiteSpace)) then
-            FEditPosition.MoveRelative(0, -1);
-
-          if FEditPosition.IsWhiteSpace then
-          begin
-            FEditPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
-            FEditPosition.MoveRelative(0, -1);
-          end;
-
-          if FEditPosition.IsWordCharacter then
-            FEditPosition.MoveCursor(mmSkipWord or mmSkipLeft) // Skip to first non word character.
-          else if FEditPosition.IsSpecialCharacter then
-            FEditPosition.MoveCursor(mmSkipSpecial or mmSkipLeft); // Skip to the first non special character
-        end;
-      end;
-    'B':
-      begin
-        for I := 1 to count do
-        begin
-          FEditPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
-          FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipLeft);
-        end;
-      end;
-    'e':
-      begin
-        for I := 1 to count do
-        begin
-          nextChar := CharAtRelativeLocation(1);
-          if (FEditPosition.IsWordCharacter and (nextChar = viWhiteSpace) or (nextChar = viSpecial)) then
-            FEditPosition.MoveRelative(0, 1);
-
-          if (FEditPosition.IsSpecialCharacter and (nextChar = viWhiteSpace) or (nextChar = viWord)) then
-            FEditPosition.MoveRelative(0, 1);
-
-          if FEditPosition.IsWhiteSpace then
-            FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
-
-          if FEditPosition.IsSpecialCharacter then
-            FEditPosition.MoveCursor(mmSkipSpecial or mmSkipRight);
-
-          if FEditPosition.IsWordCharacter then
-            FEditPosition.MoveCursor(mmSkipWord or mmSkipRight);
-
-          FEditPosition.MoveRelative(0, -1);
-        end;
-      end;
-    'E':
-      begin
-        for I := 1 to count do
-        begin
-          if (FEditPosition.IsWordCharacter or FEditPosition.IsSpecialCharacter) and
-            (CharAtRelativeLocation(1) = viWhiteSpace) then
-            FEditPosition.MoveRelative(0, 1);
-
-          if FEditPosition.IsWhiteSpace then
-            FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
-
-          FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
-          FEditPosition.MoveRelative(0, -1);
-        end;
-      end;
-    'h':
-      FEditPosition.MoveRelative(0, -count);
-    'j':
-      FEditPosition.MoveRelative(+count, 0);
-    'k':
-      FEditPosition.MoveRelative(-count, 0);
-    'l':
-      FEditPosition.MoveRelative(0, +count);
-    'w':
-      begin
-        for I := 1 to count do
-        begin
-          if FEditPosition.IsWordCharacter then
-            FEditPosition.MoveCursor(mmSkipWord or mmSkipRight) // Skip to first non word character.
-          else if FEditPosition.IsSpecialCharacter then
-            FEditPosition.MoveCursor(mmSkipSpecial or mmSkipRight or mmSkipStream);
-          // Skip to the first non special character
-
-          // If the character is whitespace or EOL then skip that whitespace
-          if FEditPosition.IsWhiteSpace or (FEditPosition.Character = #$D) then
-            FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
-        end;
-      end;
-    'W':
-      begin
-        for I := 1 to count do
-        begin
-          // Goto first white space after the end of the word.
-          FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
-          // Now skip all the white space until we're at the start of a word again.
-          FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
-        end;
-      end;
-  end;
+  if FViMoveKeybinds.ContainsKey(key) then
+    FViMoveKeybinds[key]();
 
   Pos.Col := FEditPosition.Column;
   Pos.Line := FEditPosition.Row;
@@ -623,19 +516,16 @@ begin
       SaveMarkPosition
     else if FInGotoMark then
       MoveToMarkPosition
-    else if IsMovementKey then
-      ProcessMovement
     else if CharInSet(FChar, ['0' .. '9']) then
       ActionUpdateCount
-    else
+    else if FViMoveKeybinds.ContainsKey(FChar) then
+      ProcessMovement
+    else if FViKeybinds.ContainsKey(FChar) then
     begin
-      try
-        FViKeybinds[c]();
-      except
-        // do nothing
-      end;
+      FViKeybinds[c]();
       ResetCount;
     end;
+
   finally
     // Avoid dangling reference error when closing the IDE
     FBuffer := nil;
@@ -673,19 +563,19 @@ begin
 end;
 
 procedure TViBindings.FillViBindings;
-var
-  I: Integer;
 begin
   // FViKeybinds.Add('''', ActionMark);
   // FViKeybinds.Add('*', ActionAsterisk);
+  FViMoveKeybinds.Add('$', ActionMoveEOL);
   FViKeybinds.Add('.', ActionRepeatLastCommand);
-  for I := 1 to 9 do
-    FViKeybinds.Add(Char(ord(0) + I), ActionUpdateCount);
+  FViMoveKeybinds.Add('0', ActionMoveBOLorCount);
   FViKeybinds.Add('<', ActionShiftLeft);
   FViKeybinds.Add('>', ActionShiftRight);
   FViKeybinds.Add('A', ActionAppendEOL);
+  FViMoveKeybinds.Add('B', ActionMoveNonWhitespaceBack);
   FViKeybinds.Add('C', ActionChangeRestOfLine);
   FViKeybinds.Add('D', ActionDeleteRestOfLine);
+  FViMoveKeybinds.Add('E', ActionMoveToEndOfWord);
   FViKeybinds.Add('G', ActionGoToLineNumber);
   FViKeybinds.Add('H', ActionMoveToScreenLine);
   FViKeybinds.Add('I', ActionInsertBeginningOfLine);
@@ -697,25 +587,42 @@ begin
   FViKeybinds.Add('P', ActionPasteBeforeCursor);
   FViKeybinds.Add('R', ActionReplaceCharacters);
   FViKeybinds.Add('S', ActionChangeLines);
+  FViMoveKeybinds.Add('W', ActionMoveToNextCharacterWord);
   FViKeybinds.Add('X', ActionDeleteSingleCharBeforeCursor);
   FViKeybinds.Add('Y', ActionYankLine);
   FViKeybinds.Add('^', ActionFirstNonWhiteInLine);
   FViKeybinds.Add('a', ActionAppend);
+  FViKeybinds.Add('b', ActionMoveWordBack);
   FViKeybinds.Add('c', ActionChange);
   FViKeybinds.Add('d', ActionDelete);
+  FViMoveKeybinds.Add('e', ActionMoveEndOfNextWord);
   FViKeybinds.Add('g', ActionJump);
+  FViMoveKeybinds.Add('h', ActionMoveLeft);
   FViKeybinds.Add('i', ActionInsert);
+  FViMoveKeybinds.Add('j', ActionMoveDown);
+  FViMoveKeybinds.Add('k', ActionMoveUp);
+  FViMoveKeybinds.Add('l', ActionMoveRight);
   FViKeybinds.Add('m', ActionSetMark);
   FViKeybinds.Add('n', ActionRepeatLastScan);
   FViKeybinds.Add('o', ActionOpenLineBelowCurrent);
   FViKeybinds.Add('p', ActionPaste);
   FViKeybinds.Add('s', ActionChangeSingleChar);
   FViKeybinds.Add('u', ActionUndo);
+  FViMoveKeybinds.Add('w', ActionMoveToBeginningOfNextWord);
   FViKeybinds.Add('x', ActionDeleteSingleChar);
   FViKeybinds.Add('y', ActionYank);
 end;
 
 { --- BEGIN OF ACTION PROCEDURES --------------------------------------------- }
+
+// '$'
+procedure TViBindings.ActionMoveEOL;
+begin
+  FEditPosition.MoveEOL;
+  // When moving, must stop at last char, not on line break.
+  if currentEditMode = emNone then
+    FEditPosition.MoveRelative(0, -1);
+end;
 
 // '
 procedure TViBindings.ActionMark;
@@ -742,10 +649,19 @@ begin
   FInRepeatChange := False;
 end;
 
-// 1-9
+// 0 -> count handling in ActionUpdateCount
+procedure TViBindings.ActionMoveBOLorCount;
+begin
+  FEditPosition.MoveBOL;
+end;
+
+// 1-9; 0 if no count input
 procedure TViBindings.ActionUpdateCount;
 begin
-  FCount := 10 * FCount + (ord(FChar) - ord('0'));
+  if (FChar = '0') and (not hasCountInput) then
+    ProcessMovement
+  else
+    FCount := 10 * FCount + (ord(FChar) - ord('0'));
 end;
 
 // <
@@ -769,6 +685,18 @@ begin
   SwitchToInsertModeOrDoPreviousAction;
 end;
 
+// B
+procedure TViBindings.ActionMoveNonWhitespaceBack;
+var
+  I: Integer;
+begin
+  for I := 1 to count do
+  begin
+    FEditPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
+    FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipLeft);
+  end;
+end;
+
 // C
 procedure TViBindings.ActionChangeRestOfLine;
 begin
@@ -782,6 +710,25 @@ procedure TViBindings.ActionDeleteRestOfLine;
 begin
   currentEditMode := emDelete;
   HandleChar('$');
+end;
+
+// E
+procedure TViBindings.ActionMoveToEndOfWord;
+var
+  I: Integer;
+begin
+  for I := 1 to count do
+  begin
+    if (FEditPosition.IsWordCharacter or FEditPosition.IsSpecialCharacter) and (CharAtRelativeLocation(1) = viWhiteSpace)
+    then
+      FEditPosition.MoveRelative(0, 1);
+
+    if FEditPosition.IsWhiteSpace then
+      FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
+
+    FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
+    FEditPosition.MoveRelative(0, -1);
+  end;
 end;
 
 // G
@@ -879,6 +826,20 @@ begin
   HandleChar('$');
 end;
 
+// W
+procedure TViBindings.ActionMoveToNextCharacterWord;
+var
+  I: Integer;
+begin
+  for I := 1 to count do
+  begin
+    // Goto first white space after the end of the word.
+    FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
+    // Now skip all the white space until we're at the start of a word again.
+    FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
+  end;
+end;
+
 // X
 procedure TViBindings.ActionDeleteSingleCharBeforeCursor;
 begin
@@ -912,6 +873,34 @@ procedure TViBindings.ActionAppend;
 begin
   FEditPosition.MoveRelative(0, 1);
   SwitchToInsertModeOrDoPreviousAction;
+end;
+
+// b
+procedure TViBindings.ActionMoveWordBack;
+var
+  I: Integer;
+  LNextChar: TViCharClass;
+begin
+  for I := 1 to count do
+  begin
+    LNextChar := CharAtRelativeLocation(-1);
+    if FEditPosition.IsWordCharacter and ((LNextChar = viSpecial) or (LNextChar = viWhiteSpace)) then
+      FEditPosition.MoveRelative(0, -1);
+
+    if FEditPosition.IsSpecialCharacter and ((LNextChar = viWord) or (LNextChar = viWhiteSpace)) then
+      FEditPosition.MoveRelative(0, -1);
+
+    if FEditPosition.IsWhiteSpace then
+    begin
+      FEditPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
+      FEditPosition.MoveRelative(0, -1);
+    end;
+
+    if FEditPosition.IsWordCharacter then
+      FEditPosition.MoveCursor(mmSkipWord or mmSkipLeft) // Skip to first non word character.
+    else if FEditPosition.IsSpecialCharacter then
+      FEditPosition.MoveCursor(mmSkipSpecial or mmSkipLeft); // Skip to the first non special character
+  end;
 end;
 
 // c
@@ -948,6 +937,34 @@ begin
   end;
 end;
 
+// e
+procedure TViBindings.ActionMoveEndOfNextWord;
+var
+  I: Integer;
+  LNextChar: TViCharClass;
+begin
+  for I := 1 to count do
+  begin
+    LNextChar := CharAtRelativeLocation(1);
+    if (FEditPosition.IsWordCharacter and (LNextChar = viWhiteSpace) or (LNextChar = viSpecial)) then
+      FEditPosition.MoveRelative(0, 1);
+
+    if (FEditPosition.IsSpecialCharacter and (LNextChar = viWhiteSpace) or (LNextChar = viWord)) then
+      FEditPosition.MoveRelative(0, 1);
+
+    if FEditPosition.IsWhiteSpace then
+      FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
+
+    if FEditPosition.IsSpecialCharacter then
+      FEditPosition.MoveCursor(mmSkipSpecial or mmSkipRight);
+
+    if FEditPosition.IsWordCharacter then
+      FEditPosition.MoveCursor(mmSkipWord or mmSkipRight);
+
+    FEditPosition.MoveRelative(0, -1);
+  end;
+end;
+
 // g
 procedure TViBindings.ActionJump;
 begin
@@ -964,10 +981,34 @@ begin
   end
 end;
 
+// h
+procedure TViBindings.ActionMoveLeft;
+begin
+  FEditPosition.MoveRelative(0, -count);
+end;
+
 // i
 procedure TViBindings.ActionInsert;
 begin
   SwitchToInsertModeOrDoPreviousAction;
+end;
+
+// j
+procedure TViBindings.ActionMoveDown;
+begin
+  FEditPosition.MoveRelative(+count, 0);
+end;
+
+// k
+procedure TViBindings.ActionMoveUp;
+begin
+  FEditPosition.MoveRelative(-count, 0);
+end;
+
+// l
+procedure TViBindings.ActionMoveRight;
+begin
+  FEditPosition.MoveRelative(0, +count);
 end;
 
 // m
@@ -1010,6 +1051,25 @@ end;
 procedure TViBindings.ActionUndo;
 begin
   FBuffer.Undo;
+end;
+
+// w
+procedure TViBindings.ActionMoveToBeginningOfNextWord;
+var
+  I: Integer;
+begin
+  for I := 1 to count do
+  begin
+    if FEditPosition.IsWordCharacter then
+      FEditPosition.MoveCursor(mmSkipWord or mmSkipRight) // Skip to first non word character.
+    else if FEditPosition.IsSpecialCharacter then
+      FEditPosition.MoveCursor(mmSkipSpecial or mmSkipRight or mmSkipStream);
+    // Skip to the first non special character
+
+    // If the character is whitespace or EOL then skip that whitespace
+    if FEditPosition.IsWhiteSpace or (FEditPosition.Character = #$D) then
+      FEditPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
+  end;
 end;
 
 // x
