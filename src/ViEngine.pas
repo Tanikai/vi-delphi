@@ -99,14 +99,14 @@ type
     function GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
     procedure ProcessMovement;
     procedure MoveToMarkPosition;
-    procedure Paste(const EditPosition: IOTAEditPosition; const Buffer: IOTAEditBuffer; Direction: TDirection);
+    procedure Paste(const AEditPosition: IOTAEditPosition; const ABuffer: IOTAEditBuffer; ADirection: TDirection);
     procedure SaveMarkPosition;
     function YankSelection: Boolean;
     procedure ApplyActionToBlock(Action: TBlockAction; IsLine: Boolean);
     procedure FindNextWordAtCursor(const count: Integer);
     procedure ActionFindPreviousWordAtCursor;
     procedure FindWordAtCursor(const View: IOTAEditView; const count: Integer);
-    procedure HandleChar(const c: Char);
+    procedure HandleChar(const AChar: Char);
     procedure ProcessChange;
     procedure ProcessDeletion;
     procedure ProcessLineDeletion;
@@ -187,6 +187,33 @@ type
 
 implementation
 
+{ General }
+
+function QuerySvcs(const AInstance: IUnknown; const AIntf: TGUID; out AInst): Boolean;
+begin
+  result := (AInstance <> nil) and Supports(AInstance, AIntf, AInst);
+end;
+
+function GetEditBuffer: IOTAEditBuffer;
+var
+  LEditorServices: IOTAEditorServices;
+begin
+  QuerySvcs(BorlandIDEServices, IOTAEditorServices, LEditorServices);
+  if LEditorServices <> nil then
+  begin
+    result := LEditorServices.GetTopBuffer;
+    Exit;
+  end;
+  result := nil;
+end;
+
+function GetEditPosition(ABuffer: IOTAEditBuffer): IOTAEditPosition;
+begin
+  result := nil;
+  if ABuffer <> nil then
+    result := ABuffer.GetEditPosition;
+end;
+
 { TViModeHelper }
 
 function TViModeHelper.ToString(): string;
@@ -212,38 +239,13 @@ begin
   inherited;
 end;
 
-function QuerySvcs(const Instance: IUnknown; const Intf: TGUID; out Inst): Boolean;
-begin
-  result := (Instance <> nil) and Supports(Instance, Intf, Inst);
-end;
-
-function GetEditBuffer: IOTAEditBuffer;
-var
-  iEditorServices: IOTAEditorServices;
-begin
-  QuerySvcs(BorlandIDEServices, IOTAEditorServices, iEditorServices);
-  if iEditorServices <> nil then
-  begin
-    result := iEditorServices.GetTopBuffer;
-    Exit;
-  end;
-  result := nil;
-end;
-
-function GetEditPosition(Buffer: IOTAEditBuffer): IOTAEditPosition;
-begin
-  result := nil;
-  if Buffer <> nil then
-    result := Buffer.GetEditPosition;
-end;
-
 procedure TViBindings.ConfigureCursor;
 var
-  EditBuffer: IOTAEditBuffer;
+  LEditBuffer: IOTAEditBuffer;
 begin
-  EditBuffer := GetEditBuffer;
-  if EditBuffer <> nil then
-    EditBuffer.EditOptions.UseBriefCursorShapes := (currentViMode = mNormal) or (currentViMode = mVisual);
+  LEditBuffer := GetEditBuffer;
+  if LEditBuffer <> nil then
+    LEditBuffer.EditOptions.UseBriefCursorShapes := (currentViMode = mNormal) or (currentViMode = mVisual);
 end;
 
 procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
@@ -334,104 +336,104 @@ end;
 
 procedure TViBindings.ApplyActionToBlock(Action: TBlockAction; IsLine: Boolean);
 var
-  count: Integer;
-  Pos: TOTAEditPos;
-  EditBlock: IOTAEditBlock;
+  LCount: Integer;
+  LPos: TOTAEditPos;
+  LEditBlock: IOTAEditBlock;
 begin
-  count := GetCount * GetEditCount;
+  LCount := GetCount * GetEditCount;
   ResetCount;
-  Pos := GetPositionForMove(FChar, count);
+  LPos := GetPositionForMove(FChar, LCount);
   if CharInSet(FChar, ['e', 'E']) then
-    Pos.Col := Pos.Col + 1;
+    LPos.Col := LPos.Col + 1;
 
-  EditBlock := FBuffer.EditBlock;
-  EditBlock.Reset;
-  EditBlock.BeginBlock;
-  EditBlock.Extend(Pos.Line, Pos.Col);
+  LEditBlock := FBuffer.EditBlock;
+  LEditBlock.Reset;
+  LEditBlock.BeginBlock;
+  LEditBlock.Extend(LPos.Line, LPos.Col);
   FRegisterArray[FSelectedRegister].IsLine := IsLine;
-  FRegisterArray[FSelectedRegister].Text := EditBlock.Text;
+  FRegisterArray[FSelectedRegister].Text := LEditBlock.Text;
 
   case Action of
     baDelete:
-      EditBlock.Delete;
+      LEditBlock.Delete;
     baYank:
-      EditBlock.Reset;
+      LEditBlock.Reset;
   end;
 
-  EditBlock.EndBlock;
+  LEditBlock.EndBlock;
 end;
 
 procedure TViBindings.ChangeIndentation(Direction: TDirection);
 var
-  EditBlock: IOTAEditBlock;
-  StartedBlock: Boolean;
+  LEditBlock: IOTAEditBlock;
+  LStartedBlock: Boolean;
 begin
-  StartedBlock := False;
-  EditBlock := FBuffer.EditBlock;
-  EditBlock.Save;
+  LStartedBlock := False;
+  LEditBlock := FBuffer.EditBlock;
+  LEditBlock.Save;
   FEditPosition.Save;
 
-  if EditBlock.Size = 0 then
+  if LEditBlock.Size = 0 then
   begin
-    StartedBlock := True;
+    LStartedBlock := True;
     FEditPosition.MoveBOL;
-    EditBlock.Reset;
-    EditBlock.BeginBlock;
-    EditBlock.Extend(FEditPosition.Row, FEditPosition.Column + 1);
+    LEditBlock.Reset;
+    LEditBlock.BeginBlock;
+    LEditBlock.Extend(FEditPosition.Row, FEditPosition.Column + 1);
   end
   else
   begin
     // When selecting multiple lines, if the cursor is in the first column the last line doesn't get into the block
     // and the indent seems buggy, as the cursor is on the last line but it isn't indented, so we force
     // the selection of at least one char to correct this behavior
-    EditBlock.ExtendRelative(0, 1);
+    LEditBlock.ExtendRelative(0, 1);
   end;
 
   case Direction of
     dForward:
-      EditBlock.Indent(FBuffer.EditOptions.BlockIndent);
+      LEditBlock.Indent(FBuffer.EditOptions.BlockIndent);
     dBack:
-      EditBlock.Indent(-FBuffer.EditOptions.BlockIndent);
+      LEditBlock.Indent(-FBuffer.EditOptions.BlockIndent);
   end;
 
   // If we don't call EndBlock, the selection gets buggy.
-  if StartedBlock then
-    EditBlock.EndBlock;
+  if LStartedBlock then
+    LEditBlock.EndBlock;
 
   FEditPosition.Restore;
-  EditBlock.Restore;
+  LEditBlock.Restore;
 end;
 
 function TViBindings.DeleteSelection: Boolean;
 var
-  EditBlock: IOTAEditBlock;
+  LEditBlock: IOTAEditBlock;
 begin
-  EditBlock := FBuffer.EditBlock;
-  if EditBlock.Size = 0 then
+  LEditBlock := FBuffer.EditBlock;
+  if LEditBlock.Size = 0 then
     Exit(False);
 
   FRegisterArray[FSelectedRegister].IsLine := False;
-  FRegisterArray[FSelectedRegister].Text := EditBlock.Text;
-  EditBlock.Delete;
+  FRegisterArray[FSelectedRegister].Text := LEditBlock.Text;
+  LEditBlock.Delete;
   result := True;
 end;
 
 procedure TViBindings.FindNextWordAtCursor(const count: Integer);
 var
-  EditBlock: IOTAEditBlock;
-  I: Integer;
+  LEditBlock: IOTAEditBlock;
+  i: Integer;
 begin
-  EditBlock := FBuffer.EditBlock;
-  EditBlock.Reset;
-  EditBlock.BeginBlock;
-  EditBlock.ExtendRelative(0, Length(FEditPosition.SearchOptions.SearchText));
-  if AnsiSameText(FEditPosition.SearchOptions.SearchText, EditBlock.Text) then
+  LEditBlock := FBuffer.EditBlock;
+  LEditBlock.Reset;
+  LEditBlock.BeginBlock;
+  LEditBlock.ExtendRelative(0, Length(FEditPosition.SearchOptions.SearchText));
+  if AnsiSameText(FEditPosition.SearchOptions.SearchText, LEditBlock.Text) then
     FEditPosition.MoveRelative(0, Length(FEditPosition.SearchOptions.SearchText));
-  EditBlock.EndBlock;
+  LEditBlock.EndBlock;
 
   FEditPosition.SearchOptions.Direction := sdForward;
 
-  for I := 1 to count do
+  for i := 1 to count do
     FEditPosition.SearchAgain;
 
   FEditPosition.MoveRelative(0, -Length(FEditPosition.SearchOptions.SearchText));
@@ -439,27 +441,27 @@ end;
 
 procedure TViBindings.FindWordAtCursor(const View: IOTAEditView; const count: Integer);
 var
-  EditBlock: IOTAEditBlock;
-  Pos: TOTAEditPos;
-  I: Integer;
+  LEditBlock: IOTAEditBlock;
+  LPos: TOTAEditPos;
+  i: Integer;
 begin
-  EditBlock := FBuffer.EditBlock;
+  LEditBlock := FBuffer.EditBlock;
   if FEditPosition.IsWordCharacter then
     FEditPosition.MoveCursor(mmSkipWord or mmSkipLeft)
   else
     FEditPosition.MoveCursor(mmSkipNonWord or mmSkipRight or mmSkipStream);
 
-  Pos := GetPositionForMove('e', 1);
+  LPos := GetPositionForMove('e', 1);
 
-  EditBlock := FBuffer.EditBlock;
-  EditBlock.Reset;
-  EditBlock.BeginBlock;
-  EditBlock.Extend(Pos.Line, Pos.Col + 1);
-  FEditPosition.SearchOptions.SearchText := EditBlock.Text;
-  EditBlock.EndBlock;
+  LEditBlock := FBuffer.EditBlock;
+  LEditBlock.Reset;
+  LEditBlock.BeginBlock;
+  LEditBlock.Extend(LPos.Line, LPos.Col + 1);
+  FEditPosition.SearchOptions.SearchText := LEditBlock.Text;
+  LEditBlock.EndBlock;
 
   // Move to one position after what we're searching for.
-  FEditPosition.Move(Pos.Line, Pos.Col + 1);
+  FEditPosition.Move(LPos.Line, LPos.Col + 1);
 
   FEditPosition.SearchOptions.CaseSensitive := False;
   FEditPosition.SearchOptions.Direction := sdForward;
@@ -468,7 +470,7 @@ begin
   FEditPosition.SearchOptions.WholeFile := True;
   FEditPosition.SearchOptions.WordBoundary := True;
 
-  for I := 1 to count do
+  for i := 1 to count do
     FEditPosition.SearchAgain;
 
   // Move back to the start of the text we searched for.
@@ -496,7 +498,7 @@ end;
 
 function TViBindings.GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
 var
-  Pos: TOTAEditPos;
+  LPos: TOTAEditPos;
 begin
   FMovementCount := ACount;
   FEditPosition.Save;
@@ -504,16 +506,16 @@ begin
   if FViMoveKeybinds.ContainsKey(AKey) then
     FViMoveKeybinds[AKey]();
 
-  Pos.Col := FEditPosition.Column;
-  Pos.Line := FEditPosition.Row;
+  LPos.Col := FEditPosition.Column;
+  LPos.Line := FEditPosition.Row;
   FEditPosition.Restore;
 
-  result := Pos;
+  result := LPos;
 end;
 
-procedure TViBindings.HandleChar(const c: Char);
+procedure TViBindings.HandleChar(const AChar: Char);
 begin
-  FChar := c;
+  FChar := AChar;
   FBuffer := GetEditBuffer;
   FEditPosition := GetEditPosition(FBuffer);
   try
@@ -527,7 +529,7 @@ begin
       ProcessMovement
     else if FViKeybinds.ContainsKey(FChar) then
     begin
-      FViKeybinds[c]();
+      FViKeybinds[AChar]();
       ResetCount;
     end;
 
@@ -618,6 +620,181 @@ begin
   FViKeybinds.Add('y', ActionYank);
 end;
 
+procedure TViBindings.ProcessLineDeletion;
+begin
+  if not FInRepeatChange then
+    SavePreviousAction;
+
+  FEditPosition.MoveBOL;
+  FChar := 'j';
+  ApplyActionToBlock(baDelete, True);
+  currentEditMode := emNone;
+end;
+
+procedure TViBindings.ProcessLineYanking;
+begin
+  FEditPosition.Save;
+  FEditPosition.MoveBOL;
+  FChar := 'j';
+  ApplyActionToBlock(baYank, True);
+  FEditPosition.Restore;
+  currentEditMode := emNone;
+end;
+
+procedure TViBindings.ProcessMovement;
+var
+  Pos: TOTAEditPos;
+begin
+  case currentEditMode of
+    emNone:
+      begin
+        Pos := GetPositionForMove(FChar, GetCount);
+        FEditPosition.Move(Pos.Line, Pos.Col);
+        FInGo := False;
+      end;
+    emDelete:
+      ProcessDeletion;
+    emYank:
+      ProcessYanking;
+    emChange:
+      ProcessChange;
+  end;
+
+  ResetCount;
+end;
+
+procedure TViBindings.ProcessYanking;
+begin
+  FEditPosition.Save;
+  ApplyActionToBlock(baYank, False);
+  FEditPosition.Restore;
+  currentEditMode := emNone;
+end;
+
+procedure TViBindings.MoveToMarkPosition;
+begin
+  FEditPosition.Move(FMarkArray[ord(FChar)].Line, FMarkArray[ord(FChar)].Col);
+  FInGotoMark := False;
+end;
+
+procedure TViBindings.Paste(const AEditPosition: IOTAEditPosition; const ABuffer: IOTAEditBuffer;
+  ADirection: TDirection);
+var
+  LAutoIndent, LPastingInSelection: Boolean;
+  LEditBlock: IOTAEditBlock;
+  LRow, LCol: Integer;
+
+  function FixCursorPosition: Boolean;
+  begin
+    result := (not LPastingInSelection) and (ADirection = dForward);
+  end;
+
+begin
+  SavePreviousAction;
+  LPastingInSelection := False;
+  LAutoIndent := ABuffer.BufferOptions.AutoIndent;
+
+  LEditBlock := ABuffer.EditBlock;
+  if LEditBlock.Size > 0 then
+  begin
+    LPastingInSelection := True;
+    LRow := LEditBlock.StartingRow;
+    LCol := LEditBlock.StartingColumn;
+    LEditBlock.Delete;
+    AEditPosition.Move(LRow, LCol);
+  end;
+
+  if (FRegisterArray[FSelectedRegister].IsLine) then
+  begin
+    ABuffer.BufferOptions.AutoIndent := False;
+    AEditPosition.MoveBOL;
+
+    if FixCursorPosition then
+      AEditPosition.MoveRelative(1, 0);
+
+    AEditPosition.Save;
+    AEditPosition.InsertText(FRegisterArray[FSelectedRegister].Text);
+    AEditPosition.Restore;
+    ABuffer.BufferOptions.AutoIndent := LAutoIndent;
+  end
+  else
+  begin
+    if FixCursorPosition then
+      AEditPosition.MoveRelative(0, 1);
+
+    AEditPosition.InsertText(FRegisterArray[FSelectedRegister].Text);
+  end;
+end;
+
+procedure TViBindings.SaveMarkPosition;
+begin
+  FMarkArray[ord(FChar)].Col := FEditPosition.Column;
+  FMarkArray[ord(FChar)].Line := FEditPosition.Row;
+  FInMark := False;
+end;
+
+procedure TViBindings.SavePreviousAction;
+begin
+  // TODO: Save the new actions
+  FPreviousAction.ActionChar := FChar;
+  FPreviousAction.FCurrentEditMode := currentEditMode;
+  FPreviousAction.FEditCount := FEditCount;
+  FPreviousAction.FCount := FCount;
+  // self.FPreviousAction.FInsertText := FInsertText;
+end;
+
+procedure TViBindings.SetViMode(ANewMode: TViMode);
+var
+  LText: string;
+begin
+  FCurrentViMode := ANewMode;
+  ConfigureCursor;
+  if assigned(FOnModeChanged) then
+  begin
+    LText := ANewMode.ToString;
+    FOnModeChanged(LText);
+  end;
+end;
+
+procedure TViBindings.SetOnModeChanged(ANewProc: TP_ModeChanged);
+begin
+  FOnModeChanged := ANewProc;
+  FOnModeChanged(currentViMode.ToString); // call new procedure immediately
+end;
+
+procedure TViBindings.SwitchToInsertModeOrDoPreviousAction;
+begin
+  if (FInRepeatChange) then
+    FEditPosition.InsertText(FPreviousAction.FInsertText)
+  else
+  begin
+    SavePreviousAction;
+    currentViMode := mInsert;
+  end;
+end;
+
+procedure TViBindings.ToggleActive;
+begin
+  if currentViMode = mInactive then
+    currentViMode := mNormal
+  else
+    currentViMode := mInactive;
+end;
+
+function TViBindings.YankSelection: Boolean;
+var
+  LEditBlock: IOTAEditBlock;
+begin
+  LEditBlock := FBuffer.EditBlock;
+  if LEditBlock.Size = 0 then
+    Exit(False);
+
+  FRegisterArray[FSelectedRegister].IsLine := False;
+  FRegisterArray[FSelectedRegister].Text := LEditBlock.Text;
+  LEditBlock.Reset;
+  result := True;
+end;
+
 { --- BEGIN OF ACTION PROCEDURES --------------------------------------------- }
 
 // '$'
@@ -693,9 +870,9 @@ end;
 // B
 procedure TViBindings.ActionMoveNonWhitespaceBack;
 var
-  I: Integer;
+  i: Integer;
 begin
-  for I := 1 to FMovementCount do
+  for i := 1 to FMovementCount do
   begin
     FEditPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
     FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipLeft);
@@ -720,9 +897,9 @@ end;
 // E
 procedure TViBindings.ActionMoveToEndOfWord;
 var
-  I: Integer;
+  i: Integer;
 begin
-  for I := 1 to FMovementCount do
+  for i := 1 to FMovementCount do
   begin
     if (FEditPosition.IsWordCharacter or FEditPosition.IsSpecialCharacter) and (CharAtRelativeLocation(1) = viWhiteSpace)
     then
@@ -791,10 +968,10 @@ end;
 // N
 procedure TViBindings.ActionFindPreviousWordAtCursor;
 var
-  I: Integer;
+  i: Integer;
 begin
   FEditPosition.SearchOptions.Direction := sdBackward;
-  for I := 1 to count do
+  for i := 1 to count do
     FEditPosition.SearchAgain;
 end;
 
@@ -834,9 +1011,9 @@ end;
 // W
 procedure TViBindings.ActionMoveToNextCharacterWord;
 var
-  I: Integer;
+  i: Integer;
 begin
-  for I := 1 to FMovementCount do
+  for i := 1 to FMovementCount do
   begin
     // Goto first white space after the end of the word.
     FEditPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
@@ -883,10 +1060,10 @@ end;
 // b
 procedure TViBindings.ActionMoveWordBack;
 var
-  I: Integer;
+  i: Integer;
   LNextChar: TViCharClass;
 begin
-  for I := 1 to FMovementCount do
+  for i := 1 to FMovementCount do
   begin
     LNextChar := CharAtRelativeLocation(-1);
     if FEditPosition.IsWordCharacter and ((LNextChar = viSpecial) or (LNextChar = viWhiteSpace)) then
@@ -945,10 +1122,10 @@ end;
 // e
 procedure TViBindings.ActionMoveEndOfNextWord;
 var
-  I: Integer;
+  i: Integer;
   LNextChar: TViCharClass;
 begin
-  for I := 1 to FMovementCount do
+  for i := 1 to FMovementCount do
   begin
     LNextChar := CharAtRelativeLocation(1);
     if (FEditPosition.IsWordCharacter and (LNextChar = viWhiteSpace) or (LNextChar = viSpecial)) then
@@ -1061,9 +1238,9 @@ end;
 // w
 procedure TViBindings.ActionMoveToBeginningOfNextWord;
 var
-  I: Integer;
+  i: Integer;
 begin
-  for I := 1 to FMovementCount do
+  for i := 1 to FMovementCount do
   begin
     if FEditPosition.IsWordCharacter then
       FEditPosition.MoveCursor(mmSkipWord or mmSkipRight) // Skip to first non word character.
@@ -1106,179 +1283,5 @@ begin
 end;
 
 { ---------------------------------------------------------------------------- }
-
-procedure TViBindings.ProcessLineDeletion;
-begin
-  if not FInRepeatChange then
-    SavePreviousAction;
-
-  FEditPosition.MoveBOL;
-  FChar := 'j';
-  ApplyActionToBlock(baDelete, True);
-  currentEditMode := emNone;
-end;
-
-procedure TViBindings.ProcessLineYanking;
-begin
-  FEditPosition.Save;
-  FEditPosition.MoveBOL;
-  FChar := 'j';
-  ApplyActionToBlock(baYank, True);
-  FEditPosition.Restore;
-  currentEditMode := emNone;
-end;
-
-procedure TViBindings.ProcessMovement;
-var
-  Pos: TOTAEditPos;
-begin
-  case currentEditMode of
-    emNone:
-      begin
-        Pos := GetPositionForMove(FChar, GetCount);
-        FEditPosition.Move(Pos.Line, Pos.Col);
-        FInGo := False;
-      end;
-    emDelete:
-      ProcessDeletion;
-    emYank:
-      ProcessYanking;
-    emChange:
-      ProcessChange;
-  end;
-
-  ResetCount;
-end;
-
-procedure TViBindings.ProcessYanking;
-begin
-  FEditPosition.Save;
-  ApplyActionToBlock(baYank, False);
-  FEditPosition.Restore;
-  currentEditMode := emNone;
-end;
-
-procedure TViBindings.MoveToMarkPosition;
-begin
-  FEditPosition.Move(FMarkArray[ord(FChar)].Line, FMarkArray[ord(FChar)].Col);
-  FInGotoMark := False;
-end;
-
-procedure TViBindings.Paste(const EditPosition: IOTAEditPosition; const Buffer: IOTAEditBuffer; Direction: TDirection);
-var
-  AutoIdent, PastingInSelection: Boolean;
-  EditBlock: IOTAEditBlock;
-  Row, Col: Integer;
-
-  function FixCursorPosition: Boolean;
-  begin
-    result := (not PastingInSelection) and (Direction = dForward);
-  end;
-
-begin
-  SavePreviousAction;
-  PastingInSelection := False;
-  AutoIdent := Buffer.BufferOptions.AutoIndent;
-
-  EditBlock := Buffer.EditBlock;
-  if EditBlock.Size > 0 then
-  begin
-    PastingInSelection := True;
-    Row := EditBlock.StartingRow;
-    Col := EditBlock.StartingColumn;
-    EditBlock.Delete;
-    EditPosition.Move(Row, Col);
-  end;
-
-  if (FRegisterArray[FSelectedRegister].IsLine) then
-  begin
-    Buffer.BufferOptions.AutoIndent := False;
-    EditPosition.MoveBOL;
-
-    if FixCursorPosition then
-      EditPosition.MoveRelative(1, 0);
-
-    EditPosition.Save;
-    EditPosition.InsertText(FRegisterArray[FSelectedRegister].Text);
-    EditPosition.Restore;
-    Buffer.BufferOptions.AutoIndent := AutoIdent;
-  end
-  else
-  begin
-    if FixCursorPosition then
-      EditPosition.MoveRelative(0, 1);
-
-    EditPosition.InsertText(FRegisterArray[FSelectedRegister].Text);
-  end;
-end;
-
-procedure TViBindings.SaveMarkPosition;
-begin
-  FMarkArray[ord(FChar)].Col := FEditPosition.Column;
-  FMarkArray[ord(FChar)].Line := FEditPosition.Row;
-  FInMark := False;
-end;
-
-procedure TViBindings.SavePreviousAction;
-begin
-  // TODO: Save the new actions
-  FPreviousAction.ActionChar := FChar;
-  FPreviousAction.FCurrentEditMode := currentEditMode;
-  FPreviousAction.FEditCount := FEditCount;
-  FPreviousAction.FCount := FCount;
-  // self.FPreviousAction.FInsertText := FInsertText;
-end;
-
-procedure TViBindings.SetViMode(ANewMode: TViMode);
-var
-  LText: string;
-begin
-  FCurrentViMode := ANewMode;
-  ConfigureCursor;
-  if assigned(FOnModeChanged) then
-  begin
-    LText := ANewMode.ToString;
-    FOnModeChanged(LText);
-  end;
-end;
-
-procedure TViBindings.SetOnModeChanged(ANewProc: TP_ModeChanged);
-begin
-  FOnModeChanged := ANewProc;
-  FOnModeChanged(currentViMode.ToString); // call new procedure immediately
-end;
-
-procedure TViBindings.SwitchToInsertModeOrDoPreviousAction;
-begin
-  if (FInRepeatChange) then
-    FEditPosition.InsertText(FPreviousAction.FInsertText)
-  else
-  begin
-    SavePreviousAction;
-    currentViMode := mInsert;
-  end;
-end;
-
-procedure TViBindings.ToggleActive;
-begin
-  if currentViMode = mInactive then
-    currentViMode := mNormal
-  else
-    currentViMode := mInactive;
-end;
-
-function TViBindings.YankSelection: Boolean;
-var
-  EditBlock: IOTAEditBlock;
-begin
-  EditBlock := FBuffer.EditBlock;
-  if EditBlock.Size = 0 then
-    Exit(False);
-
-  FRegisterArray[FSelectedRegister].IsLine := False;
-  FRegisterArray[FSelectedRegister].Text := EditBlock.Text;
-  EditBlock.Reset;
-  result := True;
-end;
 
 end.
