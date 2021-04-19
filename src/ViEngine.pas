@@ -172,7 +172,7 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+    procedure EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
     procedure EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
     procedure ConfigureCursor;
     property count: Integer read GetCount;
@@ -281,7 +281,9 @@ begin
   FCursorPosition.Restore;
 end;
 
-procedure TViBindings.EditKeyDown(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+procedure TViBindings.EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
+var
+  LIsLetter, LIsSymbol: Boolean;
 
   function GetTopMostEditView: IOTAEditView;
   var
@@ -299,9 +301,13 @@ begin
       Exit;
     mNormal:
       begin
-        if (((key >= ord('A')) and (key <= ord('Z'))) or ((key >= ord('0')) and (key <= ord('9'))) or
-          ((key >= 186) and (key <= 192)) or ((key >= 219) and (key <= 222))) and
-          not((ssCtrl in Shift) or (ssAlt in Shift)) and not(currentViMode = mInsert) then
+        if (ssCtrl in AShift) or (ssAlt in AShift) then
+          Exit;
+
+        LIsLetter := ((AKey >= ord('A')) and (AKey <= ord('Z'))) or ((AKey >= ord('0')) and (AKey <= ord('9')));
+        LIsSymbol := ((AKey >= 186) and (AKey <= 192)) or ((AKey >= 219) and (AKey <= 222)) or (AKey = VK_SPACE);
+
+        if LIsLetter or LIsSymbol then
         begin
           // If the keydown is a standard keyboard press not altered with a ctrl
           // or alt key then create a WM_CHAR message so we can do all the
@@ -309,24 +315,25 @@ begin
           // TViBindings.EditChar.
 
           // XXX can we switch to using ToAscii like we do for setting FInsertText
-          TranslateMessage(Msg);
-          Handled := True;
+          TranslateMessage(AMsg);
+          AHandled := True;
         end
-        else if (key = VK_ESCAPE) then // cancel all current commands
+        else if (AKey = VK_ESCAPE) then // cancel all current commands
         begin
           currentViMode := mNormal;
           currentEditMode := emNone;
           ResetCount;
-          Handled := True;
+          AHandled := True;
         end;
       end;
-  else // Insert or Visual mode
+  else
+    // Insert or Visual mode
     begin
-      if (key = VK_ESCAPE) then
+      if (AKey = VK_ESCAPE) then
       begin
         GetTopMostEditView.Buffer.BufferOptions.InsertMode := True;
         currentViMode := mNormal; // Go from Insert back to Normal
-        Handled := True;
+        AHandled := True;
 
         // Save inserted text
         Self.FPreviousAction.FInsertText := FInsertText;
@@ -488,8 +495,6 @@ begin
   View.MoveViewToCursor;
 end;
 
-// Given a movement key and a count return the position in the buffer where that movement would take you.
-// TOTAEditPos
 function TViBindings.GetCount: Integer;
 begin
   result := IfThen(FCount <= 0, 1, FCount);
@@ -505,6 +510,8 @@ begin
   result := (FCount > 0);
 end;
 
+// Given a movement key and a count return the position in the buffer where that
+// movement would take you.
 function TViBindings.GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
 var
   LPos: TOTAEditPos;
@@ -582,6 +589,7 @@ procedure TViBindings.FillViBindings;
 begin
   // FViKeybinds.Add('''', ActionMark);
   // FViKeybinds.Add('*', ActionAsterisk);
+  FViMoveKeybinds.Add(' ', ActionMoveRight);
   FViMoveKeybinds.Add('$', ActionMoveEOL);
   FViKeybinds.Add('.', ActionRepeatLastCommand);
   FViMoveKeybinds.Add('0', ActionMoveBOLorCount);
@@ -910,8 +918,8 @@ var
 begin
   for i := 1 to FMovementCount do
   begin
-    if (FCursorPosition.IsWordCharacter or FCursorPosition.IsSpecialCharacter) and (CharAtRelativeLocation(1) = viWhiteSpace)
-    then
+    if (FCursorPosition.IsWordCharacter or FCursorPosition.IsSpecialCharacter) and
+      (CharAtRelativeLocation(1) = viWhiteSpace) then
       FCursorPosition.MoveRelative(0, 1);
 
     if FCursorPosition.IsWhiteSpace then
@@ -1088,9 +1096,11 @@ begin
     end;
 
     if FCursorPosition.IsWordCharacter then
-      FCursorPosition.MoveCursor(mmSkipWord or mmSkipLeft) // Skip to first non word character.
+      FCursorPosition.MoveCursor(mmSkipWord or mmSkipLeft)
+      // Skip to first non word character.
     else if FCursorPosition.IsSpecialCharacter then
-      FCursorPosition.MoveCursor(mmSkipSpecial or mmSkipLeft); // Skip to the first non special character
+      FCursorPosition.MoveCursor(mmSkipSpecial or mmSkipLeft);
+    // Skip to the first non special character
   end;
 end;
 
