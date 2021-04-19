@@ -90,7 +90,7 @@ type
     FViMoveKeybinds: TDictionary<Char, TProc>;
 
     { General }
-    procedure ChangeIndentation(Direction: TDirection);
+    procedure ChangeIndentation(ADirection: TDirection);
     function DeleteSelection: Boolean;
     function GetCount: Integer;
     function GetEditCount: Integer;
@@ -102,10 +102,10 @@ type
     procedure Paste(const AEditPosition: IOTAEditPosition; const ABuffer: IOTAEditBuffer; ADirection: TDirection);
     procedure SaveMarkPosition;
     function YankSelection: Boolean;
-    procedure ApplyActionToSelection(Action: TBlockAction; IsLine: Boolean);
-    procedure FindNextWordAtCursor(const count: Integer);
+    procedure ApplyActionToSelection(AAction: TBlockAction; AIsLine: Boolean);
+    procedure FindNextWordAtCursor(const ACount: Integer);
     procedure ActionFindPreviousWordAtCursor;
-    procedure FindWordAtCursor(const View: IOTAEditView; const count: Integer);
+    procedure FindWordAtCursor(const AView: IOTAEditView; const ACount: Integer);
     procedure HandleChar(const AChar: Char);
     procedure ProcessChange;
     procedure ProcessDeletion;
@@ -117,7 +117,7 @@ type
     procedure SetViMode(ANewMode: TViMode);
     procedure SetOnModeChanged(ANewProc: TP_ModeChanged);
     function GetHasCountInput: Boolean;
-    function CharAtRelativeLocation(Col: Integer): TViCharClass;
+    function CharAtRelativeLocation(ACol: Integer): TViCharClass;
 
     { Action Keybinds }
     procedure ActionAppendEOL;
@@ -173,7 +173,7 @@ type
     constructor Create;
     destructor Destroy; override;
     procedure EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
-    procedure EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+    procedure EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
     procedure ConfigureCursor;
     property count: Integer read GetCount;
     property hasCountInput: Boolean read GetHasCountInput;
@@ -248,7 +248,7 @@ begin
     LEditBuffer.EditOptions.UseBriefCursorShapes := (currentViMode = mNormal) or (currentViMode = mVisual);
 end;
 
-procedure TViBindings.EditChar(key, ScanCode: Word; Shift: TShiftState; Msg: TMsg; var Handled: Boolean);
+procedure TViBindings.EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
 begin
   if currentViMode = mInactive then
     Exit;
@@ -256,16 +256,16 @@ begin
   if currentViMode = mInsert then
     Exit;
 
-  FShift := Shift;
-  HandleChar(Chr(key));
-  Handled := True;
+  FShift := AShift;
+  HandleChar(Chr(AKey));
+  AHandled := True;
   (BorlandIDEServices As IOTAEditorServices).TopView.Paint;
 end;
 
-function TViBindings.CharAtRelativeLocation(Col: Integer): TViCharClass;
+function TViBindings.CharAtRelativeLocation(ACol: Integer): TViCharClass;
 begin
   FCursorPosition.Save;
-  FCursorPosition.MoveRelative(0, Col);
+  FCursorPosition.MoveRelative(0, ACol);
   if FCursorPosition.IsWhiteSpace or (FCursorPosition.Character = #$D) then
   begin
     result := viWhiteSpace
@@ -348,7 +348,7 @@ begin
   FCount := 0;
 end;
 
-procedure TViBindings.ApplyActionToSelection(Action: TBlockAction; IsLine: Boolean);
+procedure TViBindings.ApplyActionToSelection(AAction: TBlockAction; AIsLine: Boolean);
 var
   LCount: Integer;
   LPos: TOTAEditPos;
@@ -365,11 +365,11 @@ begin
   LSelection.Reset;
   LSelection.BeginBlock;
   LSelection.Extend(LPos.Line, LPos.Col);
-  FRegisterArray[FSelectedRegister].IsLine := IsLine;
+  FRegisterArray[FSelectedRegister].IsLine := AIsLine;
   LTemp := LSelection.Text;
   FRegisterArray[FSelectedRegister].Text := LTemp;
 
-  case Action of
+  case AAction of
     baDelete:
       LSelection.Delete;
     baYank:
@@ -379,7 +379,7 @@ begin
   LSelection.EndBlock;
 end;
 
-procedure TViBindings.ChangeIndentation(Direction: TDirection);
+procedure TViBindings.ChangeIndentation(ADirection: TDirection);
 var
   LSelection: IOTAEditBlock;
   LStartedSelection: Boolean;
@@ -405,7 +405,7 @@ begin
     LSelection.ExtendRelative(0, 1);
   end;
 
-  case Direction of
+  case ADirection of
     dForward:
       LSelection.Indent(FBuffer.EditOptions.BlockIndent);
     dBack:
@@ -434,7 +434,7 @@ begin
   result := True;
 end;
 
-procedure TViBindings.FindNextWordAtCursor(const count: Integer);
+procedure TViBindings.FindNextWordAtCursor(const ACount: Integer);
 var
   LSelection: IOTAEditBlock;
   i: Integer;
@@ -449,13 +449,13 @@ begin
 
   FCursorPosition.SearchOptions.Direction := sdForward;
 
-  for i := 1 to count do
+  for i := 1 to ACount do
     FCursorPosition.SearchAgain;
 
   FCursorPosition.MoveRelative(0, -Length(FCursorPosition.SearchOptions.SearchText));
 end;
 
-procedure TViBindings.FindWordAtCursor(const View: IOTAEditView; const count: Integer);
+procedure TViBindings.FindWordAtCursor(const AView: IOTAEditView; const ACount: Integer);
 var
   LSelection: IOTAEditBlock;
   LPos: TOTAEditPos;
@@ -486,13 +486,13 @@ begin
   FCursorPosition.SearchOptions.WholeFile := True;
   FCursorPosition.SearchOptions.WordBoundary := True;
 
-  for i := 1 to count do
+  for i := 1 to ACount do
     FCursorPosition.SearchAgain;
 
   // Move back to the start of the text we searched for.
   FCursorPosition.MoveRelative(0, -Length(FCursorPosition.SearchOptions.SearchText));
 
-  View.MoveViewToCursor;
+  AView.MoveViewToCursor;
 end;
 
 function TViBindings.GetCount: Integer;
@@ -1251,6 +1251,7 @@ end;
 // u
 procedure TViBindings.ActionUndo;
 begin
+  { TODO : Jump to position that is undone }
   FBuffer.Undo;
 end;
 
