@@ -32,6 +32,7 @@ uses
 
 type
   TP_ModeChanged = reference to procedure(AMode: String);
+  TP_Movement = reference to procedure(ACount: Integer);
 
   TViMode = (mInactive, mNormal, mInsert, mVisual);
 
@@ -71,8 +72,6 @@ type
     FCurrentEditMode: TViEditMode;
     FCurrentCount: Integer; // Most recent number input of user
     FEditCount: Integer; // Previous input of number when editing text
-    { TODO : Refactor MovementCount to parameter? }
-    FMovementCount: Integer; // Just for movement
     FInGo: Boolean;
     FInMark: Boolean;
     FInGotoMark: Boolean;
@@ -88,7 +87,7 @@ type
     FOnModeChanged: TP_ModeChanged;
     // This Dictionary contains procedure references to the keybinds
     FViKeybinds: TDictionary<Char, TProc>;
-    FViMoveKeybinds: TDictionary<Char, TProc>;
+    FViMoveKeybinds: TDictionary<Char, TP_Movement>;
 
     { General }
     procedure ChangeIndentation(ADirection: TDirection);
@@ -157,18 +156,18 @@ type
     procedure ActionMark;
 
     { Movement Actions }
-    procedure ActionMoveBOLorCount;
-    procedure ActionMoveEOL;
-    procedure ActionMoveWordBack;
-    procedure ActionMoveNonWhitespaceBack;
-    procedure ActionMoveEndOfNextWord;
-    procedure ActionMoveToEndOfWord;
-    procedure ActionMoveLeft;
-    procedure ActionMoveDown;
-    procedure ActionMoveUp;
-    procedure ActionMoveRight;
-    procedure ActionMoveToBeginningOfNextWord;
-    procedure ActionMoveToNextCharacterWord;
+    procedure ActionMoveBOLorCount(ACount: Integer);
+    procedure ActionMoveEOL(ACount: Integer);
+    procedure ActionMoveWordBack(ACount: Integer);
+    procedure ActionMoveNonWhitespaceBack(ACount: Integer);
+    procedure ActionMoveEndOfNextWord(ACount: Integer);
+    procedure ActionMoveToEndOfWord(ACount: Integer);
+    procedure ActionMoveLeft(ACount: Integer);
+    procedure ActionMoveDown(ACount: Integer);
+    procedure ActionMoveUp(ACount: Integer);
+    procedure ActionMoveRight(ACount: Integer);
+    procedure ActionMoveToBeginningOfNextWord(ACount: Integer);
+    procedure ActionMoveToNextCharacterWord(ACount: Integer);
   public
     constructor Create;
     destructor Destroy; override;
@@ -228,9 +227,8 @@ begin
   currentViMode := mNormal;
   currentEditMode := emNone;
   FViKeybinds := TDictionary<Char, TProc>.Create;
-  FViMoveKeybinds := TDictionary<Char, TProc>.Create;
+  FViMoveKeybinds := TDictionary<Char, TP_Movement>.Create;
   FillViBindings;
-  WriteLn('test');
 end;
 
 destructor TViBindings.Destroy;
@@ -521,11 +519,10 @@ function TViBindings.GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEd
 var
   LPos: TOTAEditPos;
 begin
-  FMovementCount := ACount;
   FCursorPosition.Save;
 
   if FViMoveKeybinds.ContainsKey(AKey) then
-    FViMoveKeybinds[AKey]();
+    FViMoveKeybinds[AKey](ACount);
 
   LPos.Col := FCursorPosition.Column;
   LPos.Line := FCursorPosition.Row;
@@ -621,7 +618,7 @@ begin
   FViKeybinds.Add('Y', ActionYankLine);
   FViKeybinds.Add('^', ActionFirstNonWhiteInLine);
   FViKeybinds.Add('a', ActionAppend);
-  FViKeybinds.Add('b', ActionMoveWordBack);
+  FViMoveKeybinds.Add('b', ActionMoveWordBack);
   FViKeybinds.Add('c', ActionChange);
   FViKeybinds.Add('d', ActionDelete);
   FViMoveKeybinds.Add('e', ActionMoveEndOfNextWord);
@@ -820,7 +817,7 @@ end;
 { --- BEGIN OF ACTION PROCEDURES --------------------------------------------- }
 
 // '$'
-procedure TViBindings.ActionMoveEOL;
+procedure TViBindings.ActionMoveEOL(ACount: Integer);
 begin
   FCursorPosition.MoveEOL;
   // When moving, must stop at last char, not on line break.
@@ -854,7 +851,7 @@ begin
 end;
 
 // 0 -> count handling in ActionUpdateCount
-procedure TViBindings.ActionMoveBOLorCount;
+procedure TViBindings.ActionMoveBOLorCount(ACount: Integer);
 begin
   FCursorPosition.MoveBOL;
 end;
@@ -890,11 +887,11 @@ begin
 end;
 
 // B
-procedure TViBindings.ActionMoveNonWhitespaceBack;
+procedure TViBindings.ActionMoveNonWhitespaceBack(ACount: Integer);
 var
   i: Integer;
 begin
-  for i := 1 to FMovementCount do
+  for i := 1 to ACount do
   begin
     FCursorPosition.MoveCursor(mmSkipWhite or mmSkipLeft or mmSkipStream);
     FCursorPosition.MoveCursor(mmSkipNonWhite or mmSkipLeft);
@@ -917,11 +914,11 @@ begin
 end;
 
 // E
-procedure TViBindings.ActionMoveToEndOfWord;
+procedure TViBindings.ActionMoveToEndOfWord(ACount: Integer);
 var
   i: Integer;
 begin
-  for i := 1 to FMovementCount do
+  for i := 1 to ACount do
   begin
     if (FCursorPosition.IsWordCharacter or FCursorPosition.IsSpecialCharacter) and
       (CharAtRelativeLocation(1) = viWhiteSpace) then
@@ -1031,11 +1028,11 @@ begin
 end;
 
 // W
-procedure TViBindings.ActionMoveToNextCharacterWord;
+procedure TViBindings.ActionMoveToNextCharacterWord(ACount: Integer);
 var
   i: Integer;
 begin
-  for i := 1 to FMovementCount do
+  for i := 1 to ACount do
   begin
     // Goto first white space after the end of the word.
     FCursorPosition.MoveCursor(mmSkipNonWhite or mmSkipRight);
@@ -1080,12 +1077,12 @@ begin
 end;
 
 // b
-procedure TViBindings.ActionMoveWordBack;
+procedure TViBindings.ActionMoveWordBack(ACount: Integer);
 var
   i: Integer;
   LNextChar: TViCharClass;
 begin
-  for i := 1 to FMovementCount do
+  for i := 1 to ACount do
   begin
     LNextChar := CharAtRelativeLocation(-1);
     if FCursorPosition.IsWordCharacter and ((LNextChar = viSpecial) or (LNextChar = viWhiteSpace)) then
@@ -1143,12 +1140,12 @@ begin
 end;
 
 // e
-procedure TViBindings.ActionMoveEndOfNextWord;
+procedure TViBindings.ActionMoveEndOfNextWord(ACount: Integer);
 var
   i: Integer;
   LNextChar: TViCharClass;
 begin
-  for i := 1 to FMovementCount do
+  for i := 1 to ACount do
   begin
     LNextChar := CharAtRelativeLocation(1);
     if (FCursorPosition.IsWordCharacter and (LNextChar = viWhiteSpace) or (LNextChar = viSpecial)) then
@@ -1187,9 +1184,9 @@ begin
 end;
 
 // h
-procedure TViBindings.ActionMoveLeft;
+procedure TViBindings.ActionMoveLeft(ACount: Integer);
 begin
-  FCursorPosition.MoveRelative(0, -FMovementCount);
+  FCursorPosition.MoveRelative(0, -ACount);
 end;
 
 // i
@@ -1199,21 +1196,21 @@ begin
 end;
 
 // j
-procedure TViBindings.ActionMoveDown;
+procedure TViBindings.ActionMoveDown(ACount: Integer);
 begin
-  FCursorPosition.MoveRelative(+FMovementCount, 0);
+  FCursorPosition.MoveRelative(ACount, 0);
 end;
 
 // k
-procedure TViBindings.ActionMoveUp;
+procedure TViBindings.ActionMoveUp(ACount: Integer);
 begin
-  FCursorPosition.MoveRelative(-FMovementCount, 0);
+  FCursorPosition.MoveRelative(-ACount, 0);
 end;
 
 // l
-procedure TViBindings.ActionMoveRight;
+procedure TViBindings.ActionMoveRight(ACount: Integer);
 begin
-  FCursorPosition.MoveRelative(0, +FMovementCount);
+  FCursorPosition.MoveRelative(0, ACount);
 end;
 
 // m
@@ -1260,11 +1257,11 @@ begin
 end;
 
 // w
-procedure TViBindings.ActionMoveToBeginningOfNextWord;
+procedure TViBindings.ActionMoveToBeginningOfNextWord(ACount: Integer);
 var
   i: Integer;
 begin
-  for i := 1 to FMovementCount do
+  for i := 1 to ACount do
   begin
     if FCursorPosition.IsWordCharacter then
       FCursorPosition.MoveCursor(mmSkipWord or mmSkipRight) // Skip to first non word character.
