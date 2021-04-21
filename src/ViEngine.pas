@@ -59,7 +59,7 @@ type
   TViAction = record
     ActionChar: Char;
     FCurrentEditMode: TViEditMode;
-    FEditCount, FCount: Integer;
+    FEditCount, FCurrentCount: Integer;
     FInsertText: String;
   end;
 
@@ -69,9 +69,10 @@ type
     FBuffer: IOTAEditBuffer;
     FCurrentViMode: TViMode;
     FCurrentEditMode: TViEditMode;
-    FCount: Integer; // number input of user
-    FEditCount: Integer;
-    FMovementCount: Integer;
+    FCurrentCount: Integer; // Most recent number input of user
+    FEditCount: Integer; // Previous input of number when editing text
+    { TODO : Refactor MovementCount to parameter? }
+    FMovementCount: Integer; // Just for movement
     FInGo: Boolean;
     FInMark: Boolean;
     FInGotoMark: Boolean;
@@ -92,7 +93,7 @@ type
     { General }
     procedure ChangeIndentation(ADirection: TDirection);
     function DeleteSelection: Boolean;
-    function GetCount: Integer;
+    function GetCurrentCount: Integer;
     function GetEditCount: Integer;
     procedure ResetCount;
     procedure ActionUpdateCount;
@@ -174,7 +175,7 @@ type
     procedure EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
     procedure EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
     procedure ConfigureCursor;
-    property currentCount: Integer read GetCount;
+    property currentCount: Integer read GetCurrentCount;
     property editCount: Integer read GetEditCount;
     property hasCountInput: Boolean read GetHasCountInput;
     property currentViMode: TViMode read FCurrentViMode write SetViMode;
@@ -229,6 +230,7 @@ begin
   FViKeybinds := TDictionary<Char, TProc>.Create;
   FViMoveKeybinds := TDictionary<Char, TProc>.Create;
   FillViBindings;
+  WriteLn('test');
 end;
 
 destructor TViBindings.Destroy;
@@ -342,7 +344,7 @@ end;
 
 procedure TViBindings.ResetCount;
 begin
-  FCount := 0;
+  FCurrentCount := 0;
 end;
 
 procedure TViBindings.ApplyActionToSelection(AAction: TBlockAction; AIsLine: Boolean);
@@ -352,7 +354,7 @@ var
   LSelection: IOTAEditBlock;
   LTemp: String;
 begin
-  LCount := GetCount * GetEditCount;
+  LCount := GetCurrentCount * GetEditCount;
   ResetCount;
   LPos := GetPositionForMove(FChar, LCount);
   if CharInSet(FChar, ['e', 'E']) then
@@ -492,12 +494,12 @@ begin
   AView.MoveViewToCursor;
 end;
 
-function TViBindings.GetCount: Integer;
+function TViBindings.GetCurrentCount: Integer;
 begin
-  if FCount <= 0 then
+  if FCurrentCount <= 0 then
     result := 1
   else
-    result := FCount;
+    result := FCurrentCount;
 end;
 
 function TViBindings.GetEditCount: Integer;
@@ -510,7 +512,7 @@ end;
 
 function TViBindings.GetHasCountInput: Boolean;
 begin
-  result := (FCount > 0);
+  result := (FCurrentCount > 0);
 end;
 
 // Given a movement key and a count return the position in the buffer where that
@@ -668,7 +670,7 @@ begin
   case currentEditMode of
     emNone:
       begin
-        Pos := GetPositionForMove(FChar, GetCount);
+        Pos := GetPositionForMove(FChar, GetCurrentCount);
         FCursorPosition.Move(Pos.Line, Pos.Col);
         FInGo := False;
       end;
@@ -759,7 +761,7 @@ begin
   FPreviousAction.ActionChar := FChar;
   FPreviousAction.FCurrentEditMode := currentEditMode;
   FPreviousAction.FEditCount := FEditCount;
-  FPreviousAction.FCount := FCount;
+  FPreviousAction.FCurrentCount := FCurrentCount;
   // self.FPreviousAction.FInsertText := FInsertText;
 end;
 
@@ -846,7 +848,7 @@ begin
   FInRepeatChange := True;
   currentEditMode := FPreviousAction.FCurrentEditMode;
   FEditCount := FPreviousAction.FEditCount;
-  FCount := FPreviousAction.FCount;
+  FCurrentCount := FPreviousAction.FCurrentCount;
   HandleChar(FPreviousAction.ActionChar);
   FInRepeatChange := False;
 end;
@@ -863,7 +865,7 @@ begin
   if (FChar = '0') and (not hasCountInput) then
     ProcessMovement
   else
-    FCount := 10 * FCount + (ord(FChar) - ord('0'));
+    FCurrentCount := 10 * FCurrentCount + (ord(FChar) - ord('0'));
 end;
 
 // <
