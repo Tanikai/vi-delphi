@@ -45,11 +45,8 @@ type
   end;
 
   TViEditMode = (emNone, emDelete, emYank, emChange);
-
   TDirection = (dForward, dBack);
-
   TBlockAction = (baDelete, baYank);
-
   TViCharClass = (viWhiteSpace, viWord, viSpecial);
 
   TViRegister = record
@@ -57,6 +54,9 @@ type
     Text: String;
   end;
 
+  /// <summary>
+  /// Stores an action. Used for repeating actions.
+  /// </summary>
   TViAction = record
     ActionChar: Char;
     FCurrentEditMode: TViEditMode;
@@ -64,62 +64,75 @@ type
     FInsertText: String;
   end;
 
-  TViBindings = class(TObject)
+  TViEngine = class(TObject)
   private
+    { General }
     FCursorPosition: IOTAEditPosition;
     FBuffer: IOTAEditBuffer;
     FCurrentViMode: TViMode;
     FCurrentEditMode: TViEditMode;
+    FCurrentChar: Char;
+    FShiftState: TShiftState;
     FCurrentCount: Integer; // Most recent number input of user
     FEditCount: Integer; // Previous input of number when editing text
+    FOnModeChanged: TP_ModeChanged; // called when Vi Mode is changed
+    FViKeybinds: TDictionary<Char, TProc>; // Contains keybinds & procedures for Vi Actions
+    FViMoveKeybinds: TDictionary<Char, TP_Movement>; // Contains keybinds & procedures for movement
+
+    { Clipboard }
+    FRegisterArray: array [0 .. 255] of TViRegister;
+    FSelectedRegister: Integer;
+
+    { History }
+    FInRepeatChange: Boolean;
+    FPreviousAction: TViAction;
+    FInsertText: String;
+
+    { Marks }
+    FMarkArray: array [0 .. 255] of TOTAEditPos;
     FInGo: Boolean;
     FInMark: Boolean;
     FInGotoMark: Boolean;
-    FInRepeatChange: Boolean;
 
-    FSelectedRegister: Integer;
-    FPreviousAction: TViAction;
-    FInsertText: String;
-    FMarkArray: array [0 .. 255] of TOTAEditPos;
-    FRegisterArray: array [0 .. 255] of TViRegister;
-    FChar: Char;
-    FShift: TShiftState;
-    FOnModeChanged: TP_ModeChanged;
-    // This Dictionary contains procedure references to the keybinds
-    FViKeybinds: TDictionary<Char, TProc>;
-    FViMoveKeybinds: TDictionary<Char, TP_Movement>;
-
+    { --- Functions and Procedures --- }
     { General }
-    procedure ChangeIndentation(ADirection: TDirection);
-    function DeleteSelection: Boolean;
-    function GetCurrentCount: Integer;
-    function GetEditCount: Integer;
-    procedure ResetCount;
-    procedure ActionUpdateCount;
-    function GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
-    procedure ProcessMovement;
-    procedure MoveToMarkPosition;
-    procedure Paste(const AEditPosition: IOTAEditPosition; const ABuffer: IOTAEditBuffer; ADirection: TDirection);
-    procedure SaveMarkPosition;
-    function YankSelection: Boolean;
-    procedure ApplyActionToSelection(AAction: TBlockAction; AIsLine: Boolean);
-    procedure FindNextWordAtCursor(const ACount: Integer);
-    procedure ActionFindPreviousWordAtCursor;
-    procedure FindWordAtCursor(const AView: IOTAEditView; const ACount: Integer);
+    procedure FillViBindings();
     procedure HandleChar(const AChar: Char);
+    procedure SwitchToInsertModeOrDoPreviousAction;
+    procedure ResetCount;
+
+    { Text Navigation }
+    function GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
+    function CharAtRelativeLocation(ACol: Integer): TViCharClass;
+    procedure FindNextWordAtCursor(const ACount: Integer);
+    procedure FindWordAtCursor(const AView: IOTAEditView; const ACount: Integer);
+
+    { Text Editing }
+    procedure ChangeIndentation(ADirection: TDirection);
+    procedure Paste(const AEditPosition: IOTAEditPosition; const ABuffer: IOTAEditBuffer; ADirection: TDirection);
+
+    { Text Editing: Selection }
+    procedure ProcessMovement;
     procedure ProcessChange;
     procedure ProcessDeletion;
     procedure ProcessLineDeletion;
-    procedure ProcessLineYanking;
+    function DeleteSelection: Boolean;
     procedure ProcessYanking;
-    procedure SavePreviousAction;
-    procedure SwitchToInsertModeOrDoPreviousAction;
-    procedure SetViMode(ANewMode: TViMode);
-    procedure SetOnModeChanged(ANewProc: TP_ModeChanged);
-    function GetHasCountInput: Boolean;
-    function CharAtRelativeLocation(ACol: Integer): TViCharClass;
+    procedure ProcessLineYanking;
+    function YankSelection: Boolean;
+    procedure ApplyActionToSelection(AAction: TBlockAction; AIsLine: Boolean);
 
-    { Action Keybinds }
+    { History }
+    procedure SavePreviousAction;
+
+    { Marks }
+    procedure SaveMarkPosition;
+    procedure MoveToMarkPosition;
+
+    { Vi Actions }
+    procedure ActionUpdateCount;
+
+    procedure ActionFindPreviousWordAtCursor;
     procedure ActionAppendEOL;
     procedure ActionChangeRestOfLine;
     procedure ActionDeleteRestOfLine;
@@ -155,7 +168,7 @@ type
     procedure ActionRepeatLastCommand;
     procedure ActionMark;
 
-    { Movement Actions }
+    { Movement }
     procedure ActionMoveBOLorCount(ACount: Integer);
     procedure ActionMoveEOL(ACount: Integer);
     procedure ActionMoveWordBack(ACount: Integer);
@@ -168,20 +181,29 @@ type
     procedure ActionMoveRight(ACount: Integer);
     procedure ActionMoveToBeginningOfNextWord(ACount: Integer);
     procedure ActionMoveToNextCharacterWord(ACount: Integer);
+
+    { Getter / Setter }
+    function GetCurrentCount: Integer;
+    function GetEditCount: Integer;
+    function GetHasCountInput: Boolean;
+    procedure SetViMode(ANewMode: TViMode);
+    procedure SetOnModeChanged(ANewProc: TP_ModeChanged);
+
   public
-    constructor Create;
-    destructor Destroy; override;
-    procedure EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
-    procedure EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
-    procedure ConfigureCursor;
     property currentCount: Integer read GetCurrentCount;
     property editCount: Integer read GetEditCount;
     property hasCountInput: Boolean read GetHasCountInput;
     property currentViMode: TViMode read FCurrentViMode write SetViMode;
     property currentEditMode: TViEditMode read FCurrentEditMode write FCurrentEditMode;
     property onModeChanged: TP_ModeChanged read FOnModeChanged write SetOnModeChanged;
+
+    constructor Create;
+    destructor Destroy; override;
+    procedure EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
+    procedure EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
+    procedure ConfigureCursor;
     procedure ToggleActive();
-    procedure FillViBindings();
+
   end;
 
 implementation
@@ -222,7 +244,7 @@ end;
 
 { TViBindings }
 
-constructor TViBindings.Create;
+constructor TViEngine.Create;
 begin
   currentViMode := mNormal;
   currentEditMode := emNone;
@@ -231,14 +253,14 @@ begin
   FillViBindings;
 end;
 
-destructor TViBindings.Destroy;
+destructor TViEngine.Destroy;
 begin
   FreeAndNil(FViKeybinds);
   FreeAndNil(FViMoveKeybinds);
   inherited;
 end;
 
-procedure TViBindings.ConfigureCursor;
+procedure TViEngine.ConfigureCursor;
 var
   LEditBuffer: IOTAEditBuffer;
 begin
@@ -247,7 +269,7 @@ begin
     LEditBuffer.EditOptions.UseBriefCursorShapes := (currentViMode = mNormal) or (currentViMode = mVisual);
 end;
 
-procedure TViBindings.EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
+procedure TViEngine.EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
 begin
   if currentViMode = mInactive then
     Exit;
@@ -255,13 +277,13 @@ begin
   if currentViMode = mInsert then
     Exit;
 
-  FShift := AShift;
+  FShiftState := AShift;
   HandleChar(Chr(AKey));
   AHandled := True;
   (BorlandIDEServices as IOTAEditorServices).TopView.Paint;
 end;
 
-function TViBindings.CharAtRelativeLocation(ACol: Integer): TViCharClass;
+function TViEngine.CharAtRelativeLocation(ACol: Integer): TViCharClass;
 begin
   FCursorPosition.Save;
   FCursorPosition.MoveRelative(0, ACol);
@@ -280,7 +302,7 @@ begin
   FCursorPosition.Restore;
 end;
 
-procedure TViBindings.EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
+procedure TViEngine.EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
 var
   LIsLetter, LIsSymbol: Boolean;
 
@@ -340,12 +362,12 @@ begin
   end;
 end;
 
-procedure TViBindings.ResetCount;
+procedure TViEngine.ResetCount;
 begin
   FCurrentCount := 0;
 end;
 
-procedure TViBindings.ApplyActionToSelection(AAction: TBlockAction; AIsLine: Boolean);
+procedure TViEngine.ApplyActionToSelection(AAction: TBlockAction; AIsLine: Boolean);
 var
   LCount: Integer;
   LPos: TOTAEditPos;
@@ -354,8 +376,8 @@ var
 begin
   LCount := GetCurrentCount * GetEditCount;
   ResetCount;
-  LPos := GetPositionForMove(FChar, LCount);
-  if CharInSet(FChar, ['e', 'E']) then
+  LPos := GetPositionForMove(FCurrentChar, LCount);
+  if CharInSet(FCurrentChar, ['e', 'E']) then
     LPos.Col := LPos.Col + 1;
 
   LSelection := FBuffer.EditBlock;
@@ -376,7 +398,7 @@ begin
   LSelection.EndBlock;
 end;
 
-procedure TViBindings.ChangeIndentation(ADirection: TDirection);
+procedure TViEngine.ChangeIndentation(ADirection: TDirection);
 var
   LSelection: IOTAEditBlock;
   LStartedSelection: Boolean;
@@ -417,7 +439,7 @@ begin
   LSelection.Restore;
 end;
 
-function TViBindings.DeleteSelection: Boolean;
+function TViEngine.DeleteSelection: Boolean;
 var
   LSelection: IOTAEditBlock;
 begin
@@ -431,7 +453,7 @@ begin
   result := True;
 end;
 
-procedure TViBindings.FindNextWordAtCursor(const ACount: Integer);
+procedure TViEngine.FindNextWordAtCursor(const ACount: Integer);
 var
   LSelection: IOTAEditBlock;
   i: Integer;
@@ -452,7 +474,7 @@ begin
   FCursorPosition.MoveRelative(0, -Length(FCursorPosition.SearchOptions.SearchText));
 end;
 
-procedure TViBindings.FindWordAtCursor(const AView: IOTAEditView; const ACount: Integer);
+procedure TViEngine.FindWordAtCursor(const AView: IOTAEditView; const ACount: Integer);
 var
   LSelection: IOTAEditBlock;
   LPos: TOTAEditPos;
@@ -492,7 +514,7 @@ begin
   AView.MoveViewToCursor;
 end;
 
-function TViBindings.GetCurrentCount: Integer;
+function TViEngine.GetCurrentCount: Integer;
 begin
   if FCurrentCount <= 0 then
     result := 1
@@ -500,7 +522,7 @@ begin
     result := FCurrentCount;
 end;
 
-function TViBindings.GetEditCount: Integer;
+function TViEngine.GetEditCount: Integer;
 begin
   if FEditCount <= 0 then
     result := 1
@@ -508,14 +530,14 @@ begin
     result := FEditCount;
 end;
 
-function TViBindings.GetHasCountInput: Boolean;
+function TViEngine.GetHasCountInput: Boolean;
 begin
   result := (FCurrentCount > 0);
 end;
 
 // Given a movement key and a count return the position in the buffer where that
 // movement would take you.
-function TViBindings.GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
+function TViEngine.GetPositionForMove(AKey: Char; ACount: Integer = 0): TOTAEditPos;
 var
   LPos: TOTAEditPos;
 begin
@@ -531,9 +553,9 @@ begin
   result := LPos;
 end;
 
-procedure TViBindings.HandleChar(const AChar: Char);
+procedure TViEngine.HandleChar(const AChar: Char);
 begin
-  FChar := AChar;
+  FCurrentChar := AChar;
   FBuffer := GetEditBuffer;
   FCursorPosition := GetEditPosition(FBuffer);
   try
@@ -541,11 +563,11 @@ begin
       SaveMarkPosition
     else if FInGotoMark then
       MoveToMarkPosition
-    else if CharInSet(FChar, ['0' .. '9']) then
+    else if CharInSet(FCurrentChar, ['0' .. '9']) then
       ActionUpdateCount
-    else if FViMoveKeybinds.ContainsKey(FChar) then
+    else if FViMoveKeybinds.ContainsKey(FCurrentChar) then
       ProcessMovement
-    else if FViKeybinds.ContainsKey(FChar) then
+    else if FViKeybinds.ContainsKey(FCurrentChar) then
     begin
       FViKeybinds[AChar]();
       ResetCount;
@@ -558,7 +580,7 @@ begin
   end;
 end;
 
-procedure TViBindings.ProcessChange;
+procedure TViEngine.ProcessChange;
 begin
   if FInRepeatChange then
   begin
@@ -567,10 +589,10 @@ begin
   end
   else
   begin
-    if (FChar = 'w') then
-      FChar := 'e';
-    if (FChar = 'W') then
-      FChar := 'E';
+    if (FCurrentChar = 'w') then
+      FCurrentChar := 'e';
+    if (FCurrentChar = 'W') then
+      FCurrentChar := 'E';
     SavePreviousAction;
     ApplyActionToSelection(baDelete, False);
     currentViMode := mInsert;
@@ -578,7 +600,7 @@ begin
   currentEditMode := emNone;
 end;
 
-procedure TViBindings.ProcessDeletion;
+procedure TViEngine.ProcessDeletion;
 begin
   if not FInRepeatChange then
     SavePreviousAction;
@@ -587,7 +609,7 @@ begin
   currentEditMode := emNone;
 end;
 
-procedure TViBindings.FillViBindings;
+procedure TViEngine.FillViBindings;
 begin
   // FViKeybinds.Add('''', ActionMark);
   // FViKeybinds.Add('*', ActionAsterisk);
@@ -639,35 +661,35 @@ begin
   FViKeybinds.Add('y', ActionYank);
 end;
 
-procedure TViBindings.ProcessLineDeletion;
+procedure TViEngine.ProcessLineDeletion;
 begin
   if not FInRepeatChange then
     SavePreviousAction;
 
   FCursorPosition.MoveBOL;
-  FChar := 'j';
+  FCurrentChar := 'j';
   ApplyActionToSelection(baDelete, True);
   currentEditMode := emNone;
 end;
 
-procedure TViBindings.ProcessLineYanking;
+procedure TViEngine.ProcessLineYanking;
 begin
   FCursorPosition.Save;
   FCursorPosition.MoveBOL;
-  FChar := 'j';
+  FCurrentChar := 'j';
   ApplyActionToSelection(baYank, True);
   FCursorPosition.Restore;
   currentEditMode := emNone;
 end;
 
-procedure TViBindings.ProcessMovement;
+procedure TViEngine.ProcessMovement;
 var
   Pos: TOTAEditPos;
 begin
   case currentEditMode of
     emNone:
       begin
-        Pos := GetPositionForMove(FChar, GetCurrentCount);
+        Pos := GetPositionForMove(FCurrentChar, GetCurrentCount);
         FCursorPosition.Move(Pos.Line, Pos.Col);
         FInGo := False;
       end;
@@ -682,7 +704,7 @@ begin
   ResetCount;
 end;
 
-procedure TViBindings.ProcessYanking;
+procedure TViEngine.ProcessYanking;
 begin
   FCursorPosition.Save;
   ApplyActionToSelection(baYank, False);
@@ -690,14 +712,13 @@ begin
   currentEditMode := emNone;
 end;
 
-procedure TViBindings.MoveToMarkPosition;
+procedure TViEngine.MoveToMarkPosition;
 begin
-  FCursorPosition.Move(FMarkArray[ord(FChar)].Line, FMarkArray[ord(FChar)].Col);
+  FCursorPosition.Move(FMarkArray[ord(FCurrentChar)].Line, FMarkArray[ord(FCurrentChar)].Col);
   FInGotoMark := False;
 end;
 
-procedure TViBindings.Paste(const AEditPosition: IOTAEditPosition; const ABuffer: IOTAEditBuffer;
-  ADirection: TDirection);
+procedure TViEngine.Paste(const AEditPosition: IOTAEditPosition; const ABuffer: IOTAEditBuffer; ADirection: TDirection);
 var
   LAutoIndent, LPastingInSelection: Boolean;
   LSelection: IOTAEditBlock;
@@ -745,24 +766,24 @@ begin
   end;
 end;
 
-procedure TViBindings.SaveMarkPosition;
+procedure TViEngine.SaveMarkPosition;
 begin
-  FMarkArray[ord(FChar)].Col := FCursorPosition.Column;
-  FMarkArray[ord(FChar)].Line := FCursorPosition.Row;
+  FMarkArray[ord(FCurrentChar)].Col := FCursorPosition.Column;
+  FMarkArray[ord(FCurrentChar)].Line := FCursorPosition.Row;
   FInMark := False;
 end;
 
-procedure TViBindings.SavePreviousAction;
+procedure TViEngine.SavePreviousAction;
 begin
   // TODO: Save the new actions
-  FPreviousAction.ActionChar := FChar;
+  FPreviousAction.ActionChar := FCurrentChar;
   FPreviousAction.FCurrentEditMode := currentEditMode;
   FPreviousAction.FEditCount := FEditCount;
   FPreviousAction.FCurrentCount := FCurrentCount;
   // self.FPreviousAction.FInsertText := FInsertText;
 end;
 
-procedure TViBindings.SetViMode(ANewMode: TViMode);
+procedure TViEngine.SetViMode(ANewMode: TViMode);
 var
   LText: String;
 begin
@@ -775,13 +796,13 @@ begin
   end;
 end;
 
-procedure TViBindings.SetOnModeChanged(ANewProc: TP_ModeChanged);
+procedure TViEngine.SetOnModeChanged(ANewProc: TP_ModeChanged);
 begin
   FOnModeChanged := ANewProc;
   FOnModeChanged(currentViMode.ToString); // call new procedure immediately
 end;
 
-procedure TViBindings.SwitchToInsertModeOrDoPreviousAction;
+procedure TViEngine.SwitchToInsertModeOrDoPreviousAction;
 begin
   if (FInRepeatChange) then
     FCursorPosition.InsertText(FPreviousAction.FInsertText)
@@ -792,7 +813,7 @@ begin
   end;
 end;
 
-procedure TViBindings.ToggleActive;
+procedure TViEngine.ToggleActive;
 begin
   if currentViMode = mInactive then
     currentViMode := mNormal
@@ -800,7 +821,7 @@ begin
     currentViMode := mInactive;
 end;
 
-function TViBindings.YankSelection: Boolean;
+function TViEngine.YankSelection: Boolean;
 var
   LSelection: IOTAEditBlock;
 begin
@@ -817,7 +838,7 @@ end;
 { --- BEGIN OF ACTION PROCEDURES --------------------------------------------- }
 
 // '$'
-procedure TViBindings.ActionMoveEOL(ACount: Integer);
+procedure TViEngine.ActionMoveEOL(ACount: Integer);
 begin
   FCursorPosition.MoveEOL;
   // When moving, must stop at last char, not on line break.
@@ -826,21 +847,21 @@ begin
 end;
 
 // '
-procedure TViBindings.ActionMark;
+procedure TViEngine.ActionMark;
 begin
   { TODO : I have no idea what this is }
   FInGotoMark := True;
 end;
 
 // *
-procedure TViBindings.ActionAsterisk;
+procedure TViEngine.ActionAsterisk;
 begin
   { TODO : Look for asterisk in vi specification }
   FindWordAtCursor(FBuffer.TopView, currentCount);
 end;
 
 // .
-procedure TViBindings.ActionRepeatLastCommand;
+procedure TViEngine.ActionRepeatLastCommand;
 begin
   FInRepeatChange := True;
   currentEditMode := FPreviousAction.FCurrentEditMode;
@@ -851,43 +872,43 @@ begin
 end;
 
 // 0 -> count handling in ActionUpdateCount
-procedure TViBindings.ActionMoveBOLorCount(ACount: Integer);
+procedure TViEngine.ActionMoveBOLorCount(ACount: Integer);
 begin
   FCursorPosition.MoveBOL;
 end;
 
 // 1-9; 0 if no count input
-procedure TViBindings.ActionUpdateCount;
+procedure TViEngine.ActionUpdateCount;
 begin
-  if (FChar = '0') and (not hasCountInput) then
+  if (FCurrentChar = '0') and (not hasCountInput) then
     ProcessMovement
   else
-    FCurrentCount := 10 * FCurrentCount + (ord(FChar) - ord('0'));
+    FCurrentCount := 10 * FCurrentCount + (ord(FCurrentChar) - ord('0'));
 end;
 
 // <
-procedure TViBindings.ActionShiftLeft;
+procedure TViEngine.ActionShiftLeft;
 begin
   SavePreviousAction;
   ChangeIndentation(dBack);
 end;
 
 // >
-procedure TViBindings.ActionShiftRight;
+procedure TViEngine.ActionShiftRight;
 begin
   SavePreviousAction;
   ChangeIndentation(dForward);
 end;
 
 // A
-procedure TViBindings.ActionAppendEOL;
+procedure TViEngine.ActionAppendEOL;
 begin
   FCursorPosition.MoveEOL;
   SwitchToInsertModeOrDoPreviousAction;
 end;
 
 // B
-procedure TViBindings.ActionMoveNonWhitespaceBack(ACount: Integer);
+procedure TViEngine.ActionMoveNonWhitespaceBack(ACount: Integer);
 var
   i: Integer;
 begin
@@ -899,7 +920,7 @@ begin
 end;
 
 // C
-procedure TViBindings.ActionChangeRestOfLine;
+procedure TViEngine.ActionChangeRestOfLine;
 begin
   currentEditMode := emChange;
   FEditCount := currentCount;
@@ -907,14 +928,14 @@ begin
 end;
 
 // D
-procedure TViBindings.ActionDeleteRestOfLine;
+procedure TViEngine.ActionDeleteRestOfLine;
 begin
   currentEditMode := emDelete;
   HandleChar('$');
 end;
 
 // E
-procedure TViBindings.ActionMoveToEndOfWord(ACount: Integer);
+procedure TViEngine.ActionMoveToEndOfWord(ACount: Integer);
 var
   i: Integer;
 begin
@@ -933,7 +954,7 @@ begin
 end;
 
 // G
-procedure TViBindings.ActionGoToLineNumber;
+procedure TViEngine.ActionGoToLineNumber;
 begin
   if hasCountInput then
     FCursorPosition.GotoLine(currentCount)
@@ -942,7 +963,7 @@ begin
 end;
 
 // H
-procedure TViBindings.ActionMoveToScreenLine;
+procedure TViEngine.ActionMoveToScreenLine;
 begin
   { TODO : Support for Count: Move cursor to count'th line displayed on screen }
   FCursorPosition.Move(FBuffer.TopView.TopRow, 0);
@@ -950,14 +971,14 @@ begin
 end;
 
 // I
-procedure TViBindings.ActionInsertBeginningOfLine;
+procedure TViEngine.ActionInsertBeginningOfLine;
 begin
   FCursorPosition.MoveBOL;
   SwitchToInsertModeOrDoPreviousAction;
 end;
 
 // J
-procedure TViBindings.ActionJoinLines;
+procedure TViEngine.ActionJoinLines;
 begin
   { TODO : Support for Count: Join multiple lines }
   FCursorPosition.MoveEOL;
@@ -965,7 +986,7 @@ begin
 end;
 
 // L
-procedure TViBindings.ActionMoveToBottomScreenLine;
+procedure TViEngine.ActionMoveToBottomScreenLine;
 begin
   { TODO : Support for Count: ith a count, to the first non-white of the
     count'th line from the bottom. Operators affect whole lines when used
@@ -975,7 +996,7 @@ begin
 end;
 
 // M
-procedure TViBindings.ActionMoveToMiddleOfScreen;
+procedure TViEngine.ActionMoveToMiddleOfScreen;
 var
   LView: IOTAEditView;
 begin
@@ -985,7 +1006,7 @@ begin
 end;
 
 // N
-procedure TViBindings.ActionFindPreviousWordAtCursor;
+procedure TViEngine.ActionFindPreviousWordAtCursor;
 var
   i: Integer;
 begin
@@ -995,7 +1016,7 @@ begin
 end;
 
 // O
-procedure TViBindings.ActionOpenLineAboveCurrent;
+procedure TViEngine.ActionOpenLineAboveCurrent;
 begin
   FCursorPosition.MoveBOL;
   FCursorPosition.InsertText(#13#10);
@@ -1006,13 +1027,13 @@ begin
 end;
 
 // P
-procedure TViBindings.ActionPasteBeforeCursor;
+procedure TViEngine.ActionPasteBeforeCursor;
 begin
   Paste(FCursorPosition, FBuffer, dBack);
 end;
 
 // R
-procedure TViBindings.ActionReplaceCharacters;
+procedure TViEngine.ActionReplaceCharacters;
 begin
   // XXX Fix me for '.' command
   FBuffer.BufferOptions.InsertMode := False;
@@ -1020,7 +1041,7 @@ begin
 end;
 
 // S
-procedure TViBindings.ActionChangeLines;
+procedure TViEngine.ActionChangeLines;
 begin
   currentEditMode := emChange;
   FCursorPosition.MoveBOL;
@@ -1028,7 +1049,7 @@ begin
 end;
 
 // W
-procedure TViBindings.ActionMoveToNextCharacterWord(ACount: Integer);
+procedure TViEngine.ActionMoveToNextCharacterWord(ACount: Integer);
 var
   i: Integer;
 begin
@@ -1042,7 +1063,7 @@ begin
 end;
 
 // X
-procedure TViBindings.ActionDeleteSingleCharBeforeCursor;
+procedure TViEngine.ActionDeleteSingleCharBeforeCursor;
 begin
   currentEditMode := emDelete;
   if DeleteSelection then
@@ -1055,7 +1076,7 @@ begin
 end;
 
 // Y
-procedure TViBindings.ActionYankLine;
+procedure TViEngine.ActionYankLine;
 begin
   currentEditMode := emYank;
   FEditCount := currentCount;
@@ -1063,21 +1084,21 @@ begin
 end;
 
 // ^
-procedure TViBindings.ActionFirstNonWhiteInLine;
+procedure TViEngine.ActionFirstNonWhiteInLine;
 begin
   FCursorPosition.MoveBOL;
   FCursorPosition.MoveCursor(mmSkipWhite);
 end;
 
 // a
-procedure TViBindings.ActionAppend;
+procedure TViEngine.ActionAppend;
 begin
   FCursorPosition.MoveRelative(0, 1);
   SwitchToInsertModeOrDoPreviousAction;
 end;
 
 // b
-procedure TViBindings.ActionMoveWordBack(ACount: Integer);
+procedure TViEngine.ActionMoveWordBack(ACount: Integer);
 var
   i: Integer;
   LNextChar: TViCharClass;
@@ -1106,7 +1127,7 @@ begin
 end;
 
 // c
-procedure TViBindings.ActionChange;
+procedure TViEngine.ActionChange;
 begin
   if currentEditMode = emChange then
   begin
@@ -1126,7 +1147,7 @@ begin
 end;
 
 // d
-procedure TViBindings.ActionDelete;
+procedure TViEngine.ActionDelete;
 begin
   if currentEditMode = emDelete then
   begin
@@ -1140,7 +1161,7 @@ begin
 end;
 
 // e
-procedure TViBindings.ActionMoveEndOfNextWord(ACount: Integer);
+procedure TViEngine.ActionMoveEndOfNextWord(ACount: Integer);
 var
   i: Integer;
   LNextChar: TViCharClass;
@@ -1168,7 +1189,7 @@ begin
 end;
 
 // g
-procedure TViBindings.ActionJump;
+procedure TViEngine.ActionJump;
 begin
   { TODO : Look for better name of this function }
   if FInGo then
@@ -1184,50 +1205,50 @@ begin
 end;
 
 // h
-procedure TViBindings.ActionMoveLeft(ACount: Integer);
+procedure TViEngine.ActionMoveLeft(ACount: Integer);
 begin
   FCursorPosition.MoveRelative(0, -ACount);
 end;
 
 // i
-procedure TViBindings.ActionInsert;
+procedure TViEngine.ActionInsert;
 begin
   SwitchToInsertModeOrDoPreviousAction;
 end;
 
 // j
-procedure TViBindings.ActionMoveDown(ACount: Integer);
+procedure TViEngine.ActionMoveDown(ACount: Integer);
 begin
   FCursorPosition.MoveRelative(ACount, 0);
 end;
 
 // k
-procedure TViBindings.ActionMoveUp(ACount: Integer);
+procedure TViEngine.ActionMoveUp(ACount: Integer);
 begin
   FCursorPosition.MoveRelative(-ACount, 0);
 end;
 
 // l
-procedure TViBindings.ActionMoveRight(ACount: Integer);
+procedure TViEngine.ActionMoveRight(ACount: Integer);
 begin
   FCursorPosition.MoveRelative(0, ACount);
 end;
 
 // m
-procedure TViBindings.ActionSetMark;
+procedure TViEngine.ActionSetMark;
 begin
   FInMark := True;
 end;
 
 // n
-procedure TViBindings.ActionRepeatLastScan;
+procedure TViEngine.ActionRepeatLastScan;
 begin
   { TODO : Look for better function name }
   FindNextWordAtCursor(currentCount);
 end;
 
 // o
-procedure TViBindings.ActionOpenLineBelowCurrent;
+procedure TViEngine.ActionOpenLineBelowCurrent;
 begin
   FCursorPosition.MoveEOL;
   FCursorPosition.InsertText(#13#10);
@@ -1236,13 +1257,13 @@ begin
 end;
 
 // p
-procedure TViBindings.ActionPaste;
+procedure TViEngine.ActionPaste;
 begin
   Paste(FCursorPosition, FBuffer, dForward);
 end;
 
 // s
-procedure TViBindings.ActionChangeSingleChar;
+procedure TViEngine.ActionChangeSingleChar;
 begin
   if not DeleteSelection then
     FCursorPosition.Delete(1);
@@ -1250,14 +1271,14 @@ begin
 end;
 
 // u
-procedure TViBindings.ActionUndo;
+procedure TViEngine.ActionUndo;
 begin
   { TODO : Jump to position that is undone }
   FBuffer.Undo;
 end;
 
 // w
-procedure TViBindings.ActionMoveToBeginningOfNextWord(ACount: Integer);
+procedure TViEngine.ActionMoveToBeginningOfNextWord(ACount: Integer);
 var
   i: Integer;
 begin
@@ -1275,7 +1296,7 @@ begin
 end;
 
 // x
-procedure TViBindings.ActionDeleteSingleChar;
+procedure TViEngine.ActionDeleteSingleChar;
 begin
   if not DeleteSelection then
   begin
@@ -1286,7 +1307,7 @@ begin
 end;
 
 // y
-procedure TViBindings.ActionYank;
+procedure TViEngine.ActionYank;
 begin
   if currentEditMode = emYank then
     ProcessLineYanking
