@@ -40,13 +40,15 @@ type
     STRINGS: array [0 .. 3] of String = ('Vi: -- INACTIVE --', 'Vi: -- NORMAL --', 'Vi: -- INSERT --',
       'Vi: -- VISUAL --');
   public
-    function ToString: string;
+    function ToString: String;
   end;
 
   TViEditMode = (emNone, emDelete, emYank, emChange);
 
   TDirection = (dForward, dBack);
+
   TBlockAction = (baDelete, baYank);
+
   TViCharClass = (viWhiteSpace, viWord, viSpecial);
 
   TViRegister = record
@@ -58,7 +60,7 @@ type
     ActionChar: Char;
     FCurrentEditMode: TViEditMode;
     FEditCount, FCount: Integer;
-    FInsertText: string;
+    FInsertText: String;
   end;
 
   TViBindings = class(TObject)
@@ -67,21 +69,19 @@ type
     FBuffer: IOTAEditBuffer;
     FCurrentViMode: TViMode;
     FCurrentEditMode: TViEditMode;
-
+    FCount: Integer; // number input of user
+    FEditCount: Integer;
     FMovementCount: Integer;
-
     FInGo: Boolean;
     FInMark: Boolean;
     FInGotoMark: Boolean;
     FInRepeatChange: Boolean;
-    FEditCount: Integer;
-    FCount: Integer;
+
     FSelectedRegister: Integer;
     FPreviousAction: TViAction;
     FInsertText: String;
     FMarkArray: array [0 .. 255] of TOTAEditPos;
     FRegisterArray: array [0 .. 255] of TViRegister;
-
     FChar: Char;
     FShift: TShiftState;
     FOnModeChanged: TP_ModeChanged;
@@ -168,19 +168,18 @@ type
     procedure ActionMoveRight;
     procedure ActionMoveToBeginningOfNextWord;
     procedure ActionMoveToNextCharacterWord;
-
   public
     constructor Create;
     destructor Destroy; override;
     procedure EditKeyDown(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
     procedure EditChar(AKey, AScanCode: Word; AShift: TShiftState; AMsg: TMsg; var AHandled: Boolean);
     procedure ConfigureCursor;
-    property count: Integer read GetCount;
+    property currentCount: Integer read GetCount;
+    property editCount: Integer read GetEditCount;
     property hasCountInput: Boolean read GetHasCountInput;
     property currentViMode: TViMode read FCurrentViMode write SetViMode;
     property currentEditMode: TViEditMode read FCurrentEditMode write FCurrentEditMode;
     property onModeChanged: TP_ModeChanged read FOnModeChanged write SetOnModeChanged;
-
     procedure ToggleActive();
     procedure FillViBindings();
   end;
@@ -216,7 +215,7 @@ end;
 
 { TViModeHelper }
 
-function TViModeHelper.ToString(): string;
+function TViModeHelper.ToString(): String;
 begin
   result := STRINGS[ord(Self)];
 end;
@@ -259,7 +258,7 @@ begin
   FShift := AShift;
   HandleChar(Chr(AKey));
   AHandled := True;
-  (BorlandIDEServices As IOTAEditorServices).TopView.Paint;
+  (BorlandIDEServices as IOTAEditorServices).TopView.Paint;
 end;
 
 function TViBindings.CharAtRelativeLocation(ACol: Integer): TViCharClass;
@@ -313,7 +312,6 @@ begin
           // or alt key then create a WM_CHAR message so we can do all the
           // locale mapping of the keyboard and then handle the resulting key in
           // TViBindings.EditChar.
-
           // XXX can we switch to using ToAscii like we do for setting FInsertText
           TranslateMessage(AMsg);
           AHandled := True;
@@ -326,8 +324,7 @@ begin
           AHandled := True;
         end;
       end;
-  else
-    // Insert or Visual mode
+  else // Insert or Visual mode
     begin
       if (AKey = VK_ESCAPE) then
       begin
@@ -353,7 +350,7 @@ var
   LCount: Integer;
   LPos: TOTAEditPos;
   LSelection: IOTAEditBlock;
-  LTemp: string;
+  LTemp: String;
 begin
   LCount := GetCount * GetEditCount;
   ResetCount;
@@ -497,12 +494,18 @@ end;
 
 function TViBindings.GetCount: Integer;
 begin
-  result := IfThen(FCount <= 0, 1, FCount);
+  if FCount <= 0 then
+    result := 1
+  else
+    result := FCount;
 end;
 
 function TViBindings.GetEditCount: Integer;
 begin
-  result := IfThen(FEditCount > 0, FEditCount, 1);
+  if FEditCount <= 0 then
+    result := 1
+  else
+    result := FEditCount;
 end;
 
 function TViBindings.GetHasCountInput: Boolean;
@@ -762,7 +765,7 @@ end;
 
 procedure TViBindings.SetViMode(ANewMode: TViMode);
 var
-  LText: string;
+  LText: String;
 begin
   FCurrentViMode := ANewMode;
   ConfigureCursor;
@@ -834,7 +837,7 @@ end;
 procedure TViBindings.ActionAsterisk;
 begin
   { TODO : Look for asterisk in vi specification }
-  FindWordAtCursor(FBuffer.TopView, count);
+  FindWordAtCursor(FBuffer.TopView, currentCount);
 end;
 
 // .
@@ -900,7 +903,7 @@ end;
 procedure TViBindings.ActionChangeRestOfLine;
 begin
   currentEditMode := emChange;
-  FEditCount := count;
+  FEditCount := currentCount;
   HandleChar('$');
 end;
 
@@ -934,7 +937,7 @@ end;
 procedure TViBindings.ActionGoToLineNumber;
 begin
   if hasCountInput then
-    FCursorPosition.GotoLine(count)
+    FCursorPosition.GotoLine(currentCount)
   else
     FCursorPosition.MoveEOF;
 end;
@@ -988,7 +991,7 @@ var
   i: Integer;
 begin
   FCursorPosition.SearchOptions.Direction := sdBackward;
-  for i := 1 to count do
+  for i := 1 to currentCount do
     FCursorPosition.SearchAgain;
 end;
 
@@ -1000,7 +1003,7 @@ begin
   FCursorPosition.MoveCursor(mmSkipWhite or mmSkipRight);
   FCursorPosition.MoveRelative(-1, 0);
   SwitchToInsertModeOrDoPreviousAction;
-  (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
+  (BorlandIDEServices as IOTAEditorServices).TopView.MoveViewToCursor;
 end;
 
 // P
@@ -1047,7 +1050,7 @@ begin
     HandleChar('d')
   else
   begin
-    FEditCount := count - 1;
+    FEditCount := currentCount - 1;
     HandleChar('h');
   end
 end;
@@ -1056,7 +1059,7 @@ end;
 procedure TViBindings.ActionYankLine;
 begin
   currentEditMode := emYank;
-  FEditCount := count;
+  FEditCount := currentCount;
   HandleChar('y');
 end;
 
@@ -1096,8 +1099,7 @@ begin
     end;
 
     if FCursorPosition.IsWordCharacter then
-      FCursorPosition.MoveCursor(mmSkipWord or mmSkipLeft)
-      // Skip to first non word character.
+      FCursorPosition.MoveCursor(mmSkipWord or mmSkipLeft) // Skip to first non word character.
     else if FCursorPosition.IsSpecialCharacter then
       FCursorPosition.MoveCursor(mmSkipSpecial or mmSkipLeft);
     // Skip to the first non special character
@@ -1119,7 +1121,7 @@ begin
     else
     begin
       currentEditMode := emChange;
-      FEditCount := count;
+      FEditCount := currentCount;
     end
   end;
 end;
@@ -1134,7 +1136,7 @@ begin
   else if not DeleteSelection then
   begin
     currentEditMode := emDelete;
-    FEditCount := count;
+    FEditCount := currentCount;
   end;
 end;
 
@@ -1178,7 +1180,7 @@ begin
   else
   begin
     FInGo := True;
-    FEditCount := count;
+    FEditCount := currentCount;
   end
 end;
 
@@ -1222,7 +1224,7 @@ end;
 procedure TViBindings.ActionRepeatLastScan;
 begin
   { TODO : Look for better function name }
-  FindNextWordAtCursor(count);
+  FindNextWordAtCursor(currentCount);
 end;
 
 // o
@@ -1231,7 +1233,7 @@ begin
   FCursorPosition.MoveEOL;
   FCursorPosition.InsertText(#13#10);
   SwitchToInsertModeOrDoPreviousAction;
-  (BorlandIDEServices As IOTAEditorServices).TopView.MoveViewToCursor;
+  (BorlandIDEServices as IOTAEditorServices).TopView.MoveViewToCursor;
 end;
 
 // p
@@ -1267,7 +1269,6 @@ begin
     else if FCursorPosition.IsSpecialCharacter then
       FCursorPosition.MoveCursor(mmSkipSpecial or mmSkipRight or mmSkipStream);
     // Skip to the first non special character
-
     // If the character is whitespace or EOL then skip that whitespace
     if FCursorPosition.IsWhiteSpace or (FCursorPosition.Character = #$D) then
       FCursorPosition.MoveCursor(mmSkipWhite or mmSkipRight or mmSkipStream);
@@ -1280,7 +1281,7 @@ begin
   if not DeleteSelection then
   begin
     currentEditMode := emDelete;
-    FEditCount := count - 1;
+    FEditCount := currentCount - 1;
     HandleChar('l');
   end;
 end;
@@ -1298,7 +1299,7 @@ begin
       currentEditMode := emNone;
 
     if currentEditMode = emYank then
-      FEditCount := count;
+      FEditCount := currentCount;
   end;
 end;
 
