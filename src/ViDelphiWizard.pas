@@ -40,7 +40,7 @@ type
   TVIDEWizard = class(TNotifierObject, IOTAWizard)
   private
     FEvents: TApplicationEvents;
-    FViBindings: TViBindings;
+    FViBindings: TViEngine;
     FAction: TAction;
     procedure DoApplicationMessage(var Msg: TMsg; var Handled: Boolean);
   protected
@@ -130,7 +130,7 @@ begin
   AddAction;
   FEvents := TApplicationEvents.Create(nil);
   FEvents.OnMessage := DoApplicationMessage;
-  FViBindings := TViBindings.Create;
+  FViBindings := TViEngine.Create;
   FViBindings.onModeChanged := SetActionCaption;
 end;
 
